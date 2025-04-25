@@ -1,0 +1,23 @@
+# OSX
+#
+.DS_Store
+
+# Android/IntelliJ
+#
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+.cxx/
+
+# Bundle artifacts
+*.jsbundle
+
+# Added by AI - Sensitive Backend Files (just in case)
+# Service Account Keys
+mystwell-*.json
+
+# Backend Environment Variables
+.env
