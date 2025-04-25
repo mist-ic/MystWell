@@ -342,33 +342,41 @@ export default function HomeScreen() {
           icon={fabOpen ? 'close' : 'plus'}
           actions={[
             {
-              icon: 'file-document-plus-outline',
+              // Try filled icon version
+              icon: 'file-document-plus', 
               label: 'Add Document',
               onPress: () => router.push('/document'), 
-              small: false,
+              style: styles.fabAction, 
+              labelTextColor: theme.colors.onSurface, 
+              color: theme.colors.primary, // Set icon color explicitly
             },
             {
               icon: 'bell-plus-outline',
               label: 'Add Reminder',
               onPress: () => console.log('Add Reminder pressed'), 
-              small: false,
+              style: styles.fabAction, 
+              labelTextColor: theme.colors.onSurface, 
+              color: theme.colors.primary, // Set icon color explicitly
             },
             {
               icon: 'microphone-plus', 
               label: 'Record',
               onPress: () => router.push('/record'), 
-              small: false, 
+              style: styles.fabAction, 
+              labelTextColor: theme.colors.onSurface, 
+              color: theme.colors.primary, // Set icon color explicitly
             },
-          ]}
+          ].reverse()} 
           onStateChange={({ open }) => setFabOpen(open)}
           onPress={() => {
             if (fabOpen) { /* Optional action */ }
           }}
-          fabStyle={[
-            styles.fabStyle, // Keep base styles if any
-            { backgroundColor: theme.colors.primary, bottom: tabBarHeight + 16 } // Position above tab bar
-          ]}
-          style={styles.fabGroupContainer} // Use a style prop for the container if needed for absolute positioning
+          backdropColor="transparent"
+          fabStyle={{
+            backgroundColor: theme.colors.primary,
+            borderRadius: 28 
+          }}
+          style={[styles.fabGroupContainer, { bottom: tabBarHeight + 16 }]}
           color={theme.colors.onPrimary} 
         />
       </Portal>
@@ -384,7 +392,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingBottom: 80 + 16 + 16, // Original padding + FAB height + margin
+    paddingBottom: 80 + 16 + 30, // Example: Reduced extra padding
   },
   topBar: {
     flexDirection: 'row',
@@ -519,13 +527,19 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
     // Add specific styling if needed, e.g., minWidth
   },
   // --- End Styles for Modification Modal ---
-  // Add style for the FAB group container if needed for positioning context
+  // Style for the FAB group container (positioning)
   fabGroupContainer: {
-    // position: 'absolute', // Portal might handle this, check if needed
-    // right: 16,
+    position: 'absolute',
+    right: 16,
+    // Bottom is set dynamically inline
   },
-  // Base style for the main FAB button itself (optional)
-  fabStyle: {
-    // Add base styles here if needed, separate from dynamic positioning
+  // Style for the individual action buttons
+  fabAction: {
+    backgroundColor: theme.colors.surface, 
+    borderRadius: 12, 
+    elevation: 2, 
+    // Add explicit padding if needed, though FAB.Group might control this
+    // paddingHorizontal: 8, 
+    // paddingVertical: 4,
   },
 }); 
