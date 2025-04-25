@@ -7,6 +7,8 @@ import { RecordingModule } from './recording/recording.module';
 import { AuthModule } from './auth/auth.module';
 import { MigrationModule } from './supabase/migration.module';
 import { BullModule } from '@nestjs/bullmq';
+import { PrescriptionModule } from './prescription/prescription.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Module({
   imports: [
@@ -29,7 +31,9 @@ import { BullModule } from '@nestjs/bullmq';
     SupabaseModule, // Import SupabaseModule
     MigrationModule, // Import MigrationModule
     RecordingModule, // Import RecordingModule
-    AuthModule,      // Import AuthModule
+    AuthModule,
+    PrescriptionModule,
+    ProfileModule,
   ],
   controllers: [AppController],
   providers: [AppService],
