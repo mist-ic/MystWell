@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AppHeader from '@/components/AppHeader';
+import { useAuth } from '@/context/auth';
 
 interface ProfileData {
   name: string;
@@ -40,6 +41,7 @@ interface PrivacySettings {
 const COLORS = ['#2196F3', '#E91E63', '#4CAF50', '#9C27B0', '#FF9800', '#607D8B'];
 
 export default function ProfileScreen() {
+  const { user, signOut } = useAuth();
   const theme = useTheme();
   const router = useRouter();
   const [activeUserId, setActiveUserId] = useState('1');
@@ -145,25 +147,13 @@ export default function ProfileScreen() {
     setActiveUserId(userId);
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to logout?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: () => {
-            // Handle logout logic here
-            router.replace('/login');
-          }
-        }
-      ]
-    );
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
   };
 
   return (

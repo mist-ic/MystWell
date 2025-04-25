@@ -1,17 +1,26 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Platform, StyleProp, ViewStyle } from 'react-native';
 import { Text, useTheme, IconButton, Badge } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// Define the expected props structure for the custom component
+interface RightIconComponentProps {
+  size: number;
+  color: string;
+  style?: StyleProp<ViewStyle>; 
+}
+
 interface AppHeaderProps {
   title: string;
-  leftIcon?: string;
-  rightIcon?: string;
+  leftIcon?: keyof typeof MaterialCommunityIcons.glyphMap; // Use keyof for better type safety
+  rightIcon?: keyof typeof MaterialCommunityIcons.glyphMap; // Use keyof for better type safety
   rightIconBadge?: number;
   onLeftPress?: () => void;
   onRightPress?: () => void;
   onBackPress?: () => void;
+  // Add the new prop for the custom component
+  rightIconComponent?: (props: RightIconComponentProps) => React.ReactNode;
 }
 
 export default function AppHeader({
@@ -22,9 +31,12 @@ export default function AppHeader({
   onLeftPress,
   onRightPress,
   onBackPress,
+  rightIconComponent, // Destructure the new prop
 }: AppHeaderProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const iconSize = 24;
+  const iconColor = theme.colors.onSurface;
 
   const handleBackPress = () => {
     if (onBackPress) {
@@ -55,20 +67,22 @@ export default function AppHeader({
           >
             <MaterialCommunityIcons
               name={leftIcon}
-              size={24}
-              color={theme.colors.onSurface}
+              size={iconSize}
+              color={iconColor}
             />
           </TouchableOpacity>
         )}
         
         <Text 
-          style={[styles.title, { color: theme.colors.onSurface }]}
+          style={[styles.title, { color: iconColor }]}
           numberOfLines={1}
         >
           {title}
         </Text>
 
-        {rightIcon ? (
+        {rightIconComponent ? (
+          rightIconComponent({ size: iconSize, color: iconColor, style: styles.iconButton })
+        ) : rightIcon ? (
           <View>
             <TouchableOpacity
               style={styles.iconButton}
@@ -78,8 +92,8 @@ export default function AppHeader({
             >
               <MaterialCommunityIcons
                 name={rightIcon}
-                size={24}
-                color={theme.colors.onSurface}
+                size={iconSize}
+                color={iconColor}
               />
             </TouchableOpacity>
             {rightIconBadge !== undefined && rightIconBadge > 0 && (

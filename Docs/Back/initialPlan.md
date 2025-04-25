@@ -40,7 +40,7 @@ To build a scalable microservices-based backend for the MystWell mobile health m
 ## Chosen Tech Stack
 
 *   **Language/Framework:** Node.js + TypeScript + NestJS
-*   **Runtime/Package Manager:** Bun
+*   **Runtime/Package Manager:** npm
 *   **Core Platform:** Supabase
     *   **Authentication:** Supabase Auth (for Guardians)
     *   **Database:** Supabase Postgres (stores `profiles`, `family_links`, all profile-scoped data)
