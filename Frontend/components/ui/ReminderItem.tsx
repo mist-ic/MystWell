@@ -41,28 +41,28 @@ export const ReminderItem: React.FC<ReminderItemProps> = ({ title, schedule, typ
           style={[
             styles.statusButton,
             status === 'taken' && styles.statusButtonActive,
-            { backgroundColor: status === 'taken' ? theme.colors.primaryContainer : '#f0f0f0' }
+            { backgroundColor: status === 'taken' ? theme.colors.accent : theme.colors.secondary + '30' }
           ]}
           onPress={handleTaken}
         >
           <MaterialCommunityIcons
             name="check"
             size={18}
-            color={status === 'taken' ? theme.colors.primary : '#666'}
+            color={status === 'taken' ? theme.colors.onPrimary : theme.colors.secondary}
           />
         </TouchableOpacity>
         <TouchableOpacity
           style={[
             styles.statusButton,
             status === 'not-taken' && styles.statusButtonActive,
-            { backgroundColor: status === 'not-taken' ? '#ffebee' : '#f0f0f0' }
+            { backgroundColor: status === 'not-taken' ? theme.colors.error + '30' : theme.colors.secondary + '30' }
           ]}
           onPress={handleNotTaken}
         >
           <MaterialCommunityIcons
             name="close"
             size={18}
-            color={status === 'not-taken' ? '#f44336' : '#666'}
+            color={status === 'not-taken' ? theme.colors.error : theme.colors.secondary}
           />
         </TouchableOpacity>
       </View>

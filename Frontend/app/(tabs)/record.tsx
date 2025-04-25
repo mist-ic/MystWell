@@ -817,7 +817,7 @@ function RecordScreenContent() {
       />
 
       {/* Recording Control Area */}
-      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.elevation.level2 }]}>
+      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.background }]}>
         {isRecording && (
           <View style={styles.timerStatusContainer}>
             <Text style={[styles.timerText, { color: theme.colors.onSurface }]}>{recordingTime}</Text>

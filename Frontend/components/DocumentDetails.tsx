@@ -85,7 +85,7 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* AI Summary Section */}
-        <Card style={styles.summaryCard}>
+        <Card style={[styles.summaryCard, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
             <View style={styles.aiSummaryHeader}>
               <View style={styles.aiHeaderLeft}>
@@ -126,8 +126,8 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
               </View>
 
               {documentSummary.warnings.length > 0 && (
-                <View style={styles.warningsSection}>
-                  <Text variant="titleSmall" style={[styles.sectionLabel, { color: theme.colors.error }]}>
+                <View style={[styles.warningsSection, { backgroundColor: theme.colors.errorContainer }]}>
+                  <Text variant="titleSmall" style={[styles.sectionLabel, { color: theme.colors.onErrorContainer }]}>
                     Important Warnings:
                   </Text>
                   {documentSummary.warnings.map((warning, index) => (
@@ -135,10 +135,10 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
                       <MaterialCommunityIcons 
                         name="alert-circle" 
                         size={16} 
-                        color={theme.colors.error} 
+                        color={theme.colors.onErrorContainer}
                         style={styles.warningIcon}
                       />
-                      <Text variant="bodyMedium" style={[styles.bulletText, { color: theme.colors.error }]}>
+                      <Text variant="bodyMedium" style={[styles.bulletText, { color: theme.colors.onErrorContainer }]}>
                         {warning}
                       </Text>
                     </View>
@@ -281,7 +281,6 @@ const styles = StyleSheet.create({
   },
   warningsSection: {
     gap: 8,
-    backgroundColor: '#FFF5F5',
     padding: 12,
     borderRadius: 8,
   },

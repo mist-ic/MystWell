@@ -53,7 +53,7 @@ export function RecordingSummary({
     const colors = {
       before: '#4CAF50',
       after: '#2196F3',
-      with: '#9C27B0',
+      with: theme.colors.primary,
     };
     return (
       <Chip

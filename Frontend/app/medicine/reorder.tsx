@@ -83,7 +83,7 @@ export default function CartScreen() {
 
       <ScrollView style={styles.content}>
         {cartItems.length > 0 ? (
-          <Surface style={styles.cartItems}>
+          <Surface style={[styles.cartItems, { backgroundColor: theme.colors.surface }]}>
             {cartItems.map((item, index) => (
               <React.Fragment key={item.id}>
                 <View style={styles.cartItem}>
@@ -148,7 +148,7 @@ export default function CartScreen() {
       </ScrollView>
 
       {cartItems.length > 0 && (
-        <Surface style={styles.bottomBar} elevation={4}>
+        <Surface style={[styles.bottomBar, { backgroundColor: theme.colors.background }]} elevation={4}>
           <View style={styles.totalContainer}>
             <Text variant="titleMedium">Total Items:</Text>
             <Text variant="titleMedium" style={styles.totalItems}>

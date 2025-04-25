@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AppHeader from '@/components/AppHeader';
+import { StyledSearchBar } from '@/components/ui/StyledSearchBar';
 
 interface Medicine {
   id: string;
@@ -150,11 +151,11 @@ export default function MedicineScreen() {
       />
       
       <View style={styles.content}>
-        <Searchbar
+        <StyledSearchBar
           placeholder="Search medicines..."
           onChangeText={setSearchQuery}
           value={searchQuery}
-          style={styles.searchBar}
+          containerStyle={styles.searchContainerMargin}
         />
 
         <ScrollView style={styles.scrollView}>
@@ -365,9 +366,8 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  searchBar: {
+  searchContainerMargin: {
     marginBottom: 16,
-    elevation: 2,
   },
   scrollView: {
     flex: 1,

@@ -156,7 +156,7 @@ export default function MedicineDetailScreen() {
       </View>
 
       <ScrollView style={styles.content}>
-        <Surface style={styles.section}>
+        <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]}>
           <Text variant="headlineMedium" style={styles.medicineName}>
             {medicineData.name}
           </Text>
