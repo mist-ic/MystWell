@@ -152,7 +152,18 @@ export default function HomeScreen() {
       </ScrollView>
       <FAB
         icon="plus"
-        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
+        style={{
+          position: 'absolute',
+          margin: 16,
+          right: 0,
+          bottom: 0,
+          borderRadius: 28,
+          width: 56,
+          height: 56,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: theme.colors.primary 
+        }}
         onPress={() => {/* Handle add reminder */}}
         color="white"
       />
@@ -224,17 +235,6 @@ const styles = StyleSheet.create({
   quickActionRow: {
     flexDirection: 'row',
     gap: 16,
-  },
-  fab: {
-    position: 'absolute',
-    margin: 16,
-    right: 0,
-    bottom: 0,
-    borderRadius: 28,
-    width: 56,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   profileButton: {
     flexDirection: 'row',

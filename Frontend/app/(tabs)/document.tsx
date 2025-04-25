@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
-import { Text, useTheme, Portal, Dialog, Button, Menu, IconButton } from 'react-native-paper';
+import { Text, useTheme, Portal, Dialog, Button, Menu, IconButton, TextInput as PaperTextInput } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { DocumentCard, DocumentInfo } from '@/components/DocumentCard';
 import { DocumentDetails } from '@/components/DocumentDetails';
 import { StyledSearchBar } from '@/components/ui/StyledSearchBar';
+import { TextInput } from 'react-native';
 
 // --- Constants based on Spec ---
 const PAGE_PADDING_HORIZONTAL = 24;
@@ -20,6 +21,8 @@ export default function DocumentScreen() {
   const [selectedDocument, setSelectedDocument] = useState<DocumentInfo | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [renameDialogVisible, setRenameDialogVisible] = useState(false);
+  const [newDocumentName, setNewDocumentName] = useState('');
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [selectedDocumentForView, setSelectedDocumentForView] = useState<DocumentInfo | null>(null);
 
@@ -59,6 +62,31 @@ export default function DocumentScreen() {
   const handleDocumentPress = useCallback((document: DocumentInfo) => {
     setSelectedDocumentForView(document);
   }, []);
+
+  const openRenameDialog = () => {
+    if (selectedDocument) {
+      setNewDocumentName(selectedDocument.title);
+      setRenameDialogVisible(true);
+      setMenuVisible(false);
+    }
+  };
+
+  const closeRenameDialog = () => {
+    setRenameDialogVisible(false);
+    setSelectedDocument(null);
+    setNewDocumentName('');
+  };
+
+  const handleRenameSave = () => {
+    if (selectedDocument && newDocumentName.trim()) {
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === selectedDocument.id ? { ...doc, title: newDocumentName.trim() } : doc
+        )
+      );
+      closeRenameDialog();
+    }
+  };
 
   // Filtering logic remains the same
   const filteredDocuments = documents.filter(doc =>
@@ -102,7 +130,7 @@ export default function DocumentScreen() {
 
       {/* 2. Header row */}
       <View style={styles.headerContainer}>
-        <Text style={[theme.fonts.headlineLarge, styles.headerTitle, { color: theme.colors.onBackground }]}>
+        <Text style={styles.headerTitle}>
           Documents
         </Text>
         <IconButton
@@ -112,7 +140,7 @@ export default function DocumentScreen() {
             size={20} // Icon size
             style={styles.createButton} // Button size/styling
             onPress={() => console.log('New Document')} // Replace with actual action
-            accessibilityLabel="New document"
+            accessibilityLabel="Create document"
         />
       </View>
 
@@ -138,8 +166,8 @@ export default function DocumentScreen() {
           <>
             {/* 4. Section headings & 5/6/7. Document lists */}
             {pinnedDocuments.length > 0 && (
-              <View style={styles.sectionContainer}>
-                <Text style={[theme.fonts.titleLarge, styles.sectionHeading, { color: theme.colors.secondary }]}>
+              <View style={styles.sectionContainerPinned}>
+                <Text style={styles.sectionHeading}>
                   Pinned
                 </Text>
                 <View style={styles.cardList}>
@@ -158,8 +186,8 @@ export default function DocumentScreen() {
             )}
 
             {unpinnedDocuments.length > 0 && (
-              <View style={styles.sectionContainer}>
-                 <Text style={[theme.fonts.titleLarge, styles.sectionHeading, { color: theme.colors.secondary }]}>
+              <View style={[styles.sectionContainerAll, pinnedDocuments.length > 0 && styles.sectionGap]}>
+                 <Text style={styles.sectionHeading}>
                   All Documents
                 </Text>
                  <View style={styles.cardList}>
@@ -185,16 +213,87 @@ export default function DocumentScreen() {
            visible={menuVisible}
            onDismiss={() => setMenuVisible(false)}
            anchor={menuPosition}
+           contentStyle={{ 
+             borderRadius: BASE_GRID, 
+             backgroundColor: theme.colors.surface
+           }}
          >
-           {/* ... Menu items ... */}
+           <Menu.Item
+             leadingIcon="pencil"
+             onPress={openRenameDialog}
+             title="Rename"
+           />
+           <Menu.Item
+             leadingIcon="share-variant"
+             onPress={() => {/* TODO: Implement */ setMenuVisible(false);}}
+             title="Share"
+           />
+           <Menu.Item
+             leadingIcon="download"
+             onPress={() => {/* TODO: Implement */ setMenuVisible(false);}}
+             title="Download"
+           />
+           <Menu.Item
+             leadingIcon="trash-can-outline"
+             onPress={() => {
+               setMenuVisible(false);
+               setDeleteDialogVisible(true);
+             }}
+             title="Delete"
+             titleStyle={{ color: theme.colors.error }}
+           />
          </Menu>
 
          <Dialog
             visible={deleteDialogVisible}
             onDismiss={() => setDeleteDialogVisible(false)}
+            style={{ 
+              borderRadius: BASE_GRID, 
+              backgroundColor: theme.colors.surface
+            }}
           >
-           {/* ... Dialog content ... */}
+            <Dialog.Title>Delete Document</Dialog.Title>
+            <Dialog.Content>
+              <Text variant="bodyMedium">
+                 Are you sure you want to delete "{selectedDocument?.title}"? This action cannot be undone.
+              </Text>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
+              <Button textColor={theme.colors.error} onPress={handleDeleteConfirm}>Delete</Button>
+            </Dialog.Actions>
          </Dialog>
+
+          <Dialog
+             visible={renameDialogVisible}
+             onDismiss={closeRenameDialog}
+             style={{ 
+               borderRadius: BASE_GRID, 
+               backgroundColor: theme.colors.surface
+             }}
+           >
+             <Dialog.Title>Rename Document</Dialog.Title>
+             <Dialog.Content>
+               <PaperTextInput
+                 label="New name"
+                 value={newDocumentName}
+                 onChangeText={setNewDocumentName}
+                 mode="outlined"
+                 autoFocus
+                 selectAllOnFocus
+               />
+             </Dialog.Content>
+             <Dialog.Actions>
+               <Button onPress={closeRenameDialog}>Cancel</Button>
+               <Button 
+                 onPress={handleRenameSave} 
+                 disabled={!newDocumentName.trim() || newDocumentName.trim() === selectedDocument?.title}
+               >
+                 Save
+               </Button>
+             </Dialog.Actions>
+           </Dialog>
+
       </Portal>
     </SafeAreaView>
   );
@@ -205,27 +304,36 @@ const styles = StyleSheet.create({
   pageContainer: {
     flex: 1,
     paddingHorizontal: PAGE_PADDING_HORIZONTAL, // 24px
-    paddingTop: PAGE_PADDING_VERTICAL,         // 32px (use paddingTop instead of vertical for Safe Area)
+    paddingTop: 0, // Remove initial top padding, handled by header container
     paddingBottom: 0, // Let SafeArea handle bottom
   },
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between', // Push items to ends
-    marginBottom: BASE_GRID * 2, // Add space below header
+    gap: BASE_GRID * 2, // 16px gap (applied between title and button if needed)
+    paddingTop: PAGE_PADDING_VERTICAL, // 32px
+    paddingBottom: 0, // Reduce bottom padding
+    paddingHorizontal: 0, // Use page padding
   },
   headerTitle: {
-    color: '#111827', // Explicitly set, though theme covers it
+    fontFamily: 'Inter-SemiBold', // Ensure font is applied
+    fontSize: 32, 
+    lineHeight: 40, 
+    fontWeight: '600',
+    color: '#111827', 
+    margin: 0, // Point 1: Ensure no extra margin
   },
   createButton: {
     width: 40, // Size 40x40
     height: 40,
     borderRadius: 20, // Make it a circle
     margin: 0, // Remove default margins if any
+    marginLeft: 'auto', // Point 1: Push button to the right
   },
-  searchContainerMargin: { // New style for margins around the search bar
-    marginTop: BASE_GRID * 2, // 16px
-    marginBottom: BASE_GRID * 2, // 16px
+  searchContainerMargin: { 
+     marginTop: BASE_GRID * 2, // Point 8: Header to search: 16px (Now handled by this margin)
+     marginBottom: BASE_GRID * 3, // Point 8: Search to 'Pinned' heading: 24px
+     // Max width and alignSelf handled inside component
   },
   scrollContainer: {
     flex: 1,
@@ -233,11 +341,22 @@ const styles = StyleSheet.create({
   scrollContentContainer: {
     paddingBottom: PAGE_PADDING_VERTICAL, // Ensure space at the bottom
   },
-  sectionContainer: {
-     marginTop: BASE_GRID * 4, // 32px top margin
+  sectionContainerPinned: {
+     // No top margin, comes after search bar margin
+  },
+  sectionContainerAll: {
+     // Default top margin unless preceded by pinned section
+     marginTop: BASE_GRID * 4, // 32px default top margin
+  },
+  sectionGap: {
+      marginTop: BASE_GRID * 4, // Point 8: Section gap 32px (Applies to 'All Docs' when 'Pinned' exists)
   },
   sectionHeading: {
-    color: '#374151', // Secondary heading color
+    fontFamily: 'Inter-Medium', // Ensure font
+    fontSize: 20, 
+    lineHeight: 28, 
+    fontWeight: '500',
+    color: '#374151', 
     marginBottom: BASE_GRID * 1.5, // 12px bottom margin
   },
   cardList: {

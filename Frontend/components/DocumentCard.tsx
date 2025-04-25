@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, GestureResponderEvent } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, GestureResponderEvent, Platform } from 'react-native';
 import { Text, useTheme, IconButton } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -29,12 +29,16 @@ export function DocumentCard({ document, isPinned, onPin, onPress, onMorePress }
   const cardBackgroundColor = isPinned
     ? theme.colors.primaryContainer
     : isPressed
-      ? theme.colors.surfaceVariant
+      ? '#F3F4F6'
       : theme.colors.surface;
 
-  const cardBorderColor = isPressed ? theme.colors.outline : 'transparent';
+  const cardBorderColor = isPinned
+    ? theme.colors.outline
+    : isPressed
+      ? '#D1D5DB'
+      : theme.colors.outline;
 
-  const iconStrokeColor = theme.colors.bodyText || '#1F2937';
+  const iconStrokeColor = '#1F2937';
 
   return (
     <TouchableOpacity
@@ -48,12 +52,12 @@ export function DocumentCard({ document, isPinned, onPin, onPress, onMorePress }
       onPress={() => onPress?.(document)}
       activeOpacity={0.8}
     >
-      <View style={styles.innerContainer}>
+      <View style={[styles.innerContainer, isPinned && styles.innerContainerPinned]}>
         {isPinned && <View style={[styles.accentBar, { backgroundColor: theme.colors.primary }]} />}
 
         <MaterialCommunityIcons
           name="file-document-outline"
-          size={24}
+          size={20}
           color={iconStrokeColor}
           style={styles.fileIcon}
         />
@@ -61,7 +65,7 @@ export function DocumentCard({ document, isPinned, onPin, onPress, onMorePress }
         <View style={styles.textContainer}>
           <Text style={styles.titleText} numberOfLines={1}>{document.title}</Text>
           <View style={styles.metadataGroup}>
-            <Text style={styles.metadataText}>{document.type.toUpperCase()}</Text>
+            <Text style={[styles.metadataText, styles.metadataTypeText]}>{document.type.toUpperCase()}</Text>
             <Text style={styles.metadataText}>{document.size}</Text>
           </View>
         </View>
@@ -74,7 +78,7 @@ export function DocumentCard({ document, isPinned, onPin, onPress, onMorePress }
               icon="pin"
               size={20}
               onPress={() => onPin(document.id)}
-              iconColor={isPinned ? theme.colors.primary : theme.colors.onSurfaceVariant}
+              iconColor={isPinned ? theme.colors.primary : '#6B7280'}
               style={styles.actionButton}
               accessibilityLabel={isPinned ? "Unpin document" : "Pin document"}
             />
@@ -83,9 +87,9 @@ export function DocumentCard({ document, isPinned, onPin, onPress, onMorePress }
             icon="dots-vertical"
             size={20}
             onPress={onMorePress}
-            iconColor={theme.colors.onSurfaceVariant}
+            iconColor={'#6B7280'}
             style={styles.actionButton}
-            accessibilityLabel="More actions"
+            accessibilityLabel="More options"
           />
         </View>
       </View>
@@ -108,6 +112,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: BASE_GRID * 2,
     gap: BASE_GRID * 1.5,
   },
+  innerContainerPinned: {
+    paddingLeft: BASE_GRID * 1.5,
+  },
   accentBar: {
     width: 4,
     height: '100%',
@@ -116,7 +123,8 @@ const styles = StyleSheet.create({
     top: 0,
   },
   fileIcon: {
-    marginLeft: (props: any) => props.isPinned ? 4 : 0,
+    // Size/Color set via props
+    // No margin needed if gap used correctly
   },
   textContainer: {
     flexDirection: 'column',
@@ -125,9 +133,10 @@ const styles = StyleSheet.create({
   },
   titleText: {
     fontSize: 16,
+    fontFamily: 'Inter-Medium',
     fontWeight: '500',
     color: '#111827',
-    lineHeight: 16 * 1.5,
+    lineHeight: 24,
   },
   metadataGroup: {
     flexDirection: 'row',
@@ -136,11 +145,15 @@ const styles = StyleSheet.create({
   },
   metadataText: {
     fontSize: 12,
+    fontFamily: 'Inter-Regular',
     fontWeight: '400',
     color: '#6B7280',
-    lineHeight: 12 * 1.5,
-    letterSpacing: 0.5,
-    marginRight: BASE_GRID,
+    lineHeight: 18,
+    marginRight: BASE_GRID * 0.5,
+  },
+  metadataTypeText: {
+    letterSpacing: 0.3,
+    marginRight: 0,
   },
   spacer: {
     flexGrow: 1,
