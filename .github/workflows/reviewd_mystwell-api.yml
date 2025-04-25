@@ -63,10 +63,9 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F7C94749BE64D22A5CA9B76A74636E4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1D3F8F2A20EA4FDCB691B7F4246B9276 }}
 
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
-        uses: azure/webapps-deploy@v3
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
         with:
-          app-name: 'mystwell-api'
-          slot-name: 'Production'
-          package: .
+          app-name: mystwell-api
+          package: ./backend/server
+
