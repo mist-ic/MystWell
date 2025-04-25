@@ -12,9 +12,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: Backend/server  # Add this to specify backend directory
 
     steps:
       - uses: actions/checkout@v4
@@ -25,19 +22,21 @@ jobs:
           node-version: '22.x'
 
       - name: npm install, build, and test
+        working-directory: Backend/server
         run: |
           npm install
           npm run build
           npm run test --if-present
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        working-directory: Backend/server
+        run: zip -r ../../release.zip ./*
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: Backend/server/release.zip
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -45,9 +44,6 @@ jobs:
     environment:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
@@ -61,9 +57,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_21537E7DEDFE46EEB3B46C952CF05AD6 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F7C94749BE64D22A5CA9B76A74636E4 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1D3F8F2A20EA4FDCB691B7F4246B9276 }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -72,4 +68,3 @@ jobs:
           app-name: 'mystwell-api'
           slot-name: 'Production'
           package: .
-          
