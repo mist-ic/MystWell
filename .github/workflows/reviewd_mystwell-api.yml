@@ -12,8 +12,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read #This is required for actions/checkout
+    defaults:
+      run:
+        working-directory: Backend/server  # Add this to specify backend directory
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +27,7 @@ jobs:
       - name: npm install, build, and test
         run: |
           npm install
-          npm run build --if-present
+          npm run build
           npm run test --if-present
 
       - name: Zip artifact for deployment
@@ -36,7 +37,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: release.zip
+          path: Backend/server/release.zip
 
   deploy:
     runs-on: ubuntu-latest
