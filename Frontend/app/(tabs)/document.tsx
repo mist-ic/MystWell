@@ -1,13 +1,19 @@
-import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
-import { Text, useTheme, Portal, Dialog, Button, Menu, IconButton, TextInput as PaperTextInput } from 'react-native-paper';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, StyleSheet, ScrollView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { Text, useTheme, Portal, Dialog, Button, Menu, IconButton, TextInput as PaperTextInput, Modal } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { DocumentCard, DocumentInfo } from '@/components/DocumentCard';
+import { DocumentCard } from '@/components/DocumentCard';
 import { DocumentDetails } from '@/components/DocumentDetails';
 import { StyledSearchBar } from '@/components/ui/StyledSearchBar';
 import { TextInput } from 'react-native';
+// @ts-ignore - Suppress incorrect type definition error for default import
+import scanDocument from 'react-native-document-scanner-plugin';
+import { useAuth } from '@/context/auth';
+
+// Define API Base URL (TODO: Move to central config/env)
+const API_BASE_URL = 'https://mystwell.me';
 
 // --- Constants based on Spec ---
 const PAGE_PADDING_HORIZONTAL = 24;
@@ -15,57 +21,156 @@ const PAGE_PADDING_VERTICAL = 32;
 const CONTENT_MAX_WIDTH = 1200; // May not be strictly necessary in RN
 const BASE_GRID = 8;
 
+// Define type based on backend schema
+export interface DocumentInfo {
+  id: string;
+  profile_id: string;
+  storage_path: string;
+  display_name: string | null;
+  status: 'pending_upload' | 'uploaded' | 'queued' | 'processing' | 'processed' | 'processing_failed' | 'processing_retried';
+  detected_document_type: string | null;
+  structured_data: any | null; // Or a more specific type if known
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  // --- UI specific additions (optional) ---
+  // isPinned?: boolean;
+  // icon?: string; // Derive icon from detected_document_type?
+}
+
 export default function DocumentScreen() {
   const theme = useTheme();
+  const { session, currentProfileId } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDocument, setSelectedDocument] = useState<DocumentInfo | null>(null);
+  const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedDocumentMenu, setSelectedDocumentMenu] = useState<DocumentInfo | null>(null);
+  const [selectedDocumentForView, setSelectedDocumentForView] = useState<DocumentInfo | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
   const [renameDialogVisible, setRenameDialogVisible] = useState(false);
   const [newDocumentName, setNewDocumentName] = useState('');
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const [selectedDocumentForView, setSelectedDocumentForView] = useState<DocumentInfo | null>(null);
+  const [addDocumentModalVisible, setAddDocumentModalVisible] = useState(false);
 
-  // Mock data (Keep using existing data structure for now)
-  const [documents, setDocuments] = useState<DocumentInfo[]>([
-    { id: '1', title: 'Cover Letter', type: 'PDF', size: '1.232 MB', isPinned: true, icon: 'file-document' },
-    { id: '2', title: 'Company Portfolio Template', type: 'PDF', size: '1.232 MB', isPinned: true, icon: 'file-presentation-box' },
-    { id: '3', title: 'Curriculum Vitae', type: 'PDF', size: '1.232 MB', icon: 'file-account' },
-    { id: '4', title: 'References', type: 'PDF', size: '1.232 MB', icon: 'file-certificate' },
-    { id: '5', title: 'Letter of Recommendation', type: 'PDF', size: '1.232 MB', icon: 'file-document-edit' },
-    { id: '6', title: 'Certificate', type: 'PDF', size: '1.232 MB', icon: 'certificate' }
-  ]);
-  const [isLoading, setIsLoading] = useState(false); // Add loading state example
+  // --- Data Fetching --- 
+  const fetchDocuments = useCallback(async () => {
+    if (!session || !currentProfileId) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        }
+      });
+      if (!response.ok) {
+         throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setDocuments(data as DocumentInfo[]); 
+    } catch (error) {
+      console.error("Error fetching documents:", error);
+      Alert.alert("Error", "Could not fetch documents.");
+      setDocuments([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session, currentProfileId]);
 
+  useEffect(() => {
+    fetchDocuments();
+  }, [fetchDocuments]);
+
+  // --- Polling for status updates ---
+  useEffect(() => {
+    if (!session || !currentProfileId) return; // Don't poll if not logged in
+
+    // Check if any documents are in a processing state
+    const isProcessing = documents.some(doc => 
+        ['queued', 'processing', 'processing_retried'].includes(doc.status)
+    );
+
+    let intervalId: NodeJS.Timeout | null = null;
+
+    if (isProcessing) {
+      console.log('Polling started for document status updates...');
+      intervalId = setInterval(() => {
+        console.log('Polling: fetching documents...');
+        fetchDocuments(); 
+      }, 10000); // Poll every 10 seconds
+    } else {
+      console.log('No documents processing, polling stopped.');
+    }
+
+    // Cleanup function to clear the interval when the component unmounts
+    // or when dependencies change (e.g., user logs out, or no longer processing)
+    return () => {
+      if (intervalId) {
+        console.log('Clearing polling interval.');
+        clearInterval(intervalId);
+      }
+    };
+  }, [session, currentProfileId, fetchDocuments, documents]); // Add documents as dependency
+
+  // TODO: Implement real-time subscription for status updates (Alternative to polling)
+  // Similar to Recording feature
+
+  // --- Placeholder actions (will be implemented) ---
   const handlePin = useCallback((id: string) => {
-    setDocuments(prev => prev.map(doc =>
-      doc.id === id ? { ...doc, isPinned: !doc.isPinned } : doc
-    ));
+    console.log("Pin action TBD", id);
+    // setDocuments(prev => prev.map(doc =>
+    //   doc.id === id ? { ...doc, isPinned: !doc.isPinned } : doc
+    // ));
   }, []);
 
   const handleMorePress = useCallback((document: DocumentInfo, event: any) => {
     const { pageX, pageY } = event.nativeEvent;
     setMenuPosition({ x: pageX - 150, y: pageY + 10 });
-    setSelectedDocument(document);
+    setSelectedDocumentMenu(document);
     setMenuVisible(true);
   }, []);
 
-  const handleDeleteConfirm = useCallback(() => {
-    if (selectedDocument) {
-      setDocuments(prev => prev.filter(doc => doc.id !== selectedDocument.id));
-      setSelectedDocument(null);
-    }
+  const handleDeleteConfirm = useCallback(async () => {
+    if (selectedDocumentMenu && session) {
+      const originalDocuments = documents;
+      setDocuments(prev => prev.filter(doc => doc.id !== selectedDocumentMenu.id));
     setDeleteDialogVisible(false);
     setMenuVisible(false);
-  }, [selectedDocument]);
+      try {
+        const response = await fetch(`${API_BASE_URL}/documents/${selectedDocumentMenu.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          }
+        });
+        if (!response.ok) {
+            let errorMsg = 'Failed to delete document';
+            try { errorMsg = (await response.json()).message || errorMsg; } catch(e){} 
+            throw new Error(errorMsg);
+        }
+        setSelectedDocumentMenu(null);
+      } catch (error: any) {
+        console.error("Error deleting document:", error);
+        Alert.alert("Error", error.message || "Could not delete document.");
+        setDocuments(originalDocuments); 
+      }
+    }
+  }, [selectedDocumentMenu, documents, session]);
 
   const handleDocumentPress = useCallback((document: DocumentInfo) => {
+    // Only allow viewing processed documents for now
+    if (document.status === 'processed') {
     setSelectedDocumentForView(document);
+    } else {
+       Alert.alert("Processing", `Document is currently ${document.status}. Please wait.`);
+    }
   }, []);
 
   const openRenameDialog = () => {
-    if (selectedDocument) {
-      setNewDocumentName(selectedDocument.title);
+    if (selectedDocumentMenu) {
+      setNewDocumentName(selectedDocumentMenu.display_name || ''); // Use display_name
       setRenameDialogVisible(true);
       setMenuVisible(false);
     }
@@ -73,27 +178,226 @@ export default function DocumentScreen() {
 
   const closeRenameDialog = () => {
     setRenameDialogVisible(false);
-    setSelectedDocument(null);
+    setSelectedDocumentMenu(null);
     setNewDocumentName('');
   };
 
-  const handleRenameSave = () => {
-    if (selectedDocument && newDocumentName.trim()) {
+  const handleRenameSave = async () => {
+    if (selectedDocumentMenu && newDocumentName.trim() && session) {
+      const newName = newDocumentName.trim();
+      const originalDocuments = documents;
+      const originalName = selectedDocumentMenu.display_name;
       setDocuments(prevDocs => 
         prevDocs.map(doc => 
-          doc.id === selectedDocument.id ? { ...doc, title: newDocumentName.trim() } : doc
+          doc.id === selectedDocumentMenu.id ? { ...doc, display_name: newName } : doc
         )
       );
       closeRenameDialog();
+
+      try {
+         const response = await fetch(`${API_BASE_URL}/documents/${selectedDocumentMenu.id}/rename`, {
+           method: 'PUT',
+           headers: {
+             'Content-Type': 'application/json',
+             'Authorization': `Bearer ${session.access_token}`,
+           },
+           body: JSON.stringify({ displayName: newName }),
+         });
+         if (!response.ok) {
+             let errorMsg = 'Failed to rename document';
+             try { errorMsg = (await response.json()).message || errorMsg; } catch(e){} 
+             throw new Error(errorMsg);
+         }
+      } catch (error: any) {
+         console.error("Error renaming document:", error);
+         Alert.alert("Error", error.message || "Could not rename document.");
+         setDocuments(prevDocs => 
+            prevDocs.map(doc => 
+              doc.id === selectedDocumentMenu.id ? { ...doc, display_name: originalName } : doc
+            )
+          );
+      }
     }
   };
+  
+  const handleRetryProcessing = useCallback(async () => {
+    if (!selectedDocumentMenu || selectedDocumentMenu.status !== 'processing_failed' || !session) {
+        return;
+    }
+    const docIdToRetry = selectedDocumentMenu.id;
+    setMenuVisible(false); // Close menu immediately
 
-  // Filtering logic remains the same
+    // Optimistically update status locally?
+    // setDocuments(prev => 
+    //     prev.map(doc => doc.id === docIdToRetry ? { ...doc, status: 'queued' } : doc)
+    // );
+    // Maybe better to wait for polling to update status after successful retry call
+
+    try {
+        console.log(`Requesting retry for document ${docIdToRetry}`);
+        const response = await fetch(`${API_BASE_URL}/documents/${docIdToRetry}/retry-processing`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+            },
+        });
+
+        if (!response.ok) {
+            let errorMsg = 'Failed to retry processing';
+            try { errorMsg = (await response.json()).message || errorMsg; } catch(e){} 
+            throw new Error(errorMsg);
+        }
+
+        Alert.alert("Retry Initiated", "Document has been queued for processing again.");
+        // Trigger a manual refresh or rely on polling
+        fetchDocuments(); 
+
+    } catch (error: any) {
+        console.error("Error retrying processing:", error);
+        Alert.alert("Retry Failed", error.message || "Could not retry document processing.");
+        // Revert optimistic update if implemented
+    } finally {
+        setSelectedDocumentMenu(null); // Clear selection after action
+    }
+  }, [selectedDocumentMenu, session, fetchDocuments]);
+
+  // --- Upload Helper ---
+  const uploadFile = async (filePath: string, uploadUrl: string): Promise<boolean> => {
+      // Use fetch API for upload
+      const response = await fetch(filePath);
+      const blob = await response.blob();
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          // Supabase signed URL upload often requires specific content-type
+          // If the server doesn't require it, this might be optional
+          // For images, blob.type should be correct (e.g., 'image/jpeg')
+          'Content-Type': blob.type, 
+        },
+        body: blob,
+      });
+
+      if (!uploadResponse.ok) {
+        console.error("Upload failed:", uploadResponse.status, await uploadResponse.text());
+        throw new Error('Failed to upload image to storage.');
+      }
+      
+      console.log("File uploaded successfully to:", uploadUrl);
+      return true;
+  };
+
+  // --- Scan Document Logic ---
+  const handleScanDocument = async () => {
+     if (isScanning || isUploading) return; 
+
+     let documentId: string | null = null; 
+     let storagePath: string | null = null; // Also declare storagePath outside
+
+     setIsScanning(true);
+     try {
+        // Note: The type definition for scanDocument might be inaccurate in the plugin's types
+        // We might need to cast the result or use // @ts-ignore if linter complains here
+        const result: { scannedImages?: string[] } = await scanDocument({
+            croppedImageQuality: 100, 
+            responseType: 'imageFilePath', 
+            maxNumDocuments: 1 
+        });
+
+        if (result.scannedImages && result.scannedImages.length > 0) {
+            const filePath = result.scannedImages[0];
+            console.log('Scanned image path:', filePath);
+
+            setIsScanning(false);
+            setIsUploading(true);
+
+            try {
+                 if (!session || !currentProfileId) {
+                    throw new Error("User not authenticated");
+                 }
+
+                console.log("Requesting upload URL...");
+                const uploadReqResponse = await fetch(`${API_BASE_URL}/documents/upload-request`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${session.access_token}` }
+                });
+                if (!uploadReqResponse.ok) { throw new Error('Failed to get upload details'); }
+                const uploadData = await uploadReqResponse.json();
+                documentId = uploadData.documentId;
+                storagePath = uploadData.storagePath;
+                const { uploadUrl } = uploadData;
+                console.log(`Received upload URL for document ${documentId}`);
+
+                if (!documentId || !storagePath) { throw new Error('Invalid upload details received.'); }
+
+                const optimisticDoc: DocumentInfo = {
+                    id: documentId,
+                    profile_id: currentProfileId,
+                    storage_path: storagePath, 
+                    display_name: 'Scanned Document', 
+                    status: 'pending_upload',
+                    detected_document_type: null,
+                    structured_data: null,
+                    error_message: null,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                };
+                setDocuments(prev => [optimisticDoc, ...prev]);
+
+                await uploadFile(filePath, uploadUrl);
+
+                console.log(`Notifying backend of upload completion for ${documentId}`);
+                const completeResponse = await fetch(`${API_BASE_URL}/documents/upload-complete`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                  },
+                  body: JSON.stringify({ documentId, storagePath }),
+                });
+                if (!completeResponse.ok) { throw new Error('Failed to notify backend of upload completion'); }
+
+                setDocuments(prev => 
+                    prev.map(doc => doc.id === documentId ? { ...doc, status: 'uploaded' } : doc)
+                );
+                Alert.alert("Success", "Document uploaded and queued for processing.");
+
+            } catch (uploadError: any) { 
+                console.error("Upload process failed:", uploadError);
+                Alert.alert("Upload Failed", uploadError?.message || "Could not upload the document.");
+                if (documentId) {
+                   setDocuments(prev => prev.filter(doc => doc.id !== documentId));
+                }
+            } finally {
+                setIsUploading(false);
+            }
+            
+        } else {
+            console.log('Scan cancelled or no images returned.');
+        }
+     } catch (error: any) { 
+         console.error("Scan failed:", error);
+         Alert.alert("Scan Failed", error?.message || "Could not scan the document. Please check permissions or try again.");
+     } finally {
+         setIsScanning(false); 
+     }
+  };
+
+  // --- Placeholder for Upload Document --- 
+  const handleUploadDocument = () => {
+    console.log("Upload Document action triggered - TBD");
+    // TODO: Implement file picking and upload logic
+    Alert.alert("Coming Soon", "Document upload functionality is not yet implemented.");
+    setAddDocumentModalVisible(false); // Add closing the modal
+  };
+
+  // --- Filtering logic (Update to use display_name) ---
   const filteredDocuments = documents.filter(doc =>
-    doc.title.toLowerCase().includes(searchQuery.toLowerCase())
+    (doc.display_name || 'Untitled Document').toLowerCase().includes(searchQuery.toLowerCase())
   );
-  const pinnedDocuments = filteredDocuments.filter(doc => doc.isPinned);
-  const unpinnedDocuments = filteredDocuments.filter(doc => !doc.isPinned);
+  // Remove pinning logic for now unless re-implemented with backend data
+  // const pinnedDocuments = filteredDocuments.filter(doc => doc.isPinned);
+  // const unpinnedDocuments = filteredDocuments.filter(doc => !doc.isPinned);
 
   // --- Render Loading Skeleton ---
   const renderSkeleton = () => (
@@ -107,9 +411,16 @@ export default function DocumentScreen() {
   // --- Render Empty State ---
   const renderEmptySearch = () => (
      <View style={styles.emptyContainer}>
-       {/* Placeholder for illustration */}
-       <MaterialCommunityIcons name="file-question-outline" size={100} color={theme.colors.onSurfaceVariant} style={{marginBottom: BASE_GRID * 2}}/>
-       <Text style={styles.emptyText}>No documents found</Text>
+       <MaterialCommunityIcons name="file-search-outline" size={100} color={theme.colors.onSurfaceVariant} style={{marginBottom: BASE_GRID * 2}}/>
+       <Text style={styles.emptyText}>No documents match your search</Text>
+     </View>
+  );
+
+   const renderEmptyState = () => (
+     <View style={styles.emptyContainer}>
+       <MaterialCommunityIcons name="file-multiple-outline" size={100} color={theme.colors.onSurfaceVariant} style={{marginBottom: BASE_GRID * 2}}/>
+       <Text style={styles.emptyText}>No documents yet</Text>
+       <Text style={styles.emptySubText}>Tap the + button to scan your first document.</Text>
      </View>
   );
 
@@ -137,10 +448,11 @@ export default function DocumentScreen() {
             icon="plus"
             iconColor={theme.colors.onPrimary}
             containerColor={theme.colors.primary}
-            size={20} // Icon size
-            style={styles.createButton} // Button size/styling
-            onPress={() => console.log('New Document')} // Replace with actual action
-            accessibilityLabel="Create document"
+            size={20}
+            style={styles.createButton}
+            onPress={() => setAddDocumentModalVisible(true)} // Open modal instead of menu
+            disabled={isScanning || isUploading}
+            accessibilityLabel="Add new document"
         />
       </View>
 
@@ -149,61 +461,32 @@ export default function DocumentScreen() {
         value={searchQuery}
         onChangeText={setSearchQuery}
         placeholder="Search documents"
-        containerStyle={styles.searchContainerMargin} // Apply margins here
+        containerStyle={styles.searchContainerMargin}
         accessibilityLabel="Search documents input"
       />
 
       <ScrollView
         style={styles.scrollContainer}
         contentContainerStyle={styles.scrollContentContainer}
-        keyboardShouldPersistTaps="handled" // Dismiss keyboard on scroll tap
+        keyboardShouldPersistTaps="handled"
       >
         {isLoading ? (
           renderSkeleton()
+        ) : documents.length === 0 && !searchQuery ? (
+          renderEmptyState()
         ) : filteredDocuments.length === 0 && searchQuery ? (
            renderEmptySearch()
         ) : (
-          <>
-            {/* 4. Section headings & 5/6/7. Document lists */}
-            {pinnedDocuments.length > 0 && (
-              <View style={styles.sectionContainerPinned}>
-                <Text style={styles.sectionHeading}>
-                  Pinned
-                </Text>
                 <View style={styles.cardList}>
-                  {pinnedDocuments.map(document => (
+              {filteredDocuments.map(document => (
                     <DocumentCard
                       key={document.id}
                       document={document}
-                      isPinned // Pass isPinned prop
-                      onPin={handlePin}
-                      onPress={handleDocumentPress}
-                      onMorePress={(event) => handleMorePress(document, event)}
-                    />
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {unpinnedDocuments.length > 0 && (
-              <View style={[styles.sectionContainerAll, pinnedDocuments.length > 0 && styles.sectionGap]}>
-                 <Text style={styles.sectionHeading}>
-                  All Documents
-                </Text>
-                 <View style={styles.cardList}>
-                    {unpinnedDocuments.map(document => (
-                      <DocumentCard
-                        key={document.id}
-                        document={document}
-                        onPin={handlePin}
-                        onPress={handleDocumentPress}
+                  onPress={() => handleDocumentPress(document)}
                         onMorePress={(event) => handleMorePress(document, event)}
                       />
                     ))}
                 </View>
-              </View>
-            )}
-          </>
         )}
       </ScrollView>
 
@@ -222,17 +505,15 @@ export default function DocumentScreen() {
              leadingIcon="pencil"
              onPress={openRenameDialog}
              title="Rename"
+             disabled={!selectedDocumentMenu || selectedDocumentMenu.status === 'pending_upload'}
            />
+           {selectedDocumentMenu?.status === 'processing_failed' && (
            <Menu.Item
-             leadingIcon="share-variant"
-             onPress={() => {/* TODO: Implement */ setMenuVisible(false);}}
-             title="Share"
+                leadingIcon="reload"
+                onPress={handleRetryProcessing}
+                title="Retry Processing"
            />
-           <Menu.Item
-             leadingIcon="download"
-             onPress={() => {/* TODO: Implement */ setMenuVisible(false);}}
-             title="Download"
-           />
+           )}
            <Menu.Item
              leadingIcon="trash-can-outline"
              onPress={() => {
@@ -241,56 +522,98 @@ export default function DocumentScreen() {
              }}
              title="Delete"
              titleStyle={{ color: theme.colors.error }}
+             disabled={!selectedDocumentMenu}
            />
          </Menu>
+
+         <Modal
+            visible={addDocumentModalVisible}
+            onDismiss={() => setAddDocumentModalVisible(false)}
+            contentContainerStyle={{
+                margin: 20,
+                borderRadius: BASE_GRID * 2,
+                padding: 20,
+                backgroundColor: theme.colors.surface,
+                alignItems: 'center',
+            }}
+         >
+            <Text variant="titleLarge" style={{marginBottom: 24, textAlign: 'center'}}>Add Document</Text>
+            
+            <View style={{flexDirection: 'row', justifyContent: 'space-around', width: '100%'}}>
+                <Button 
+                    mode="outlined"
+                    icon="camera-outline"
+                    onPress={() => {
+                        handleScanDocument();
+                        setAddDocumentModalVisible(false);
+                    }}
+                    style={{margin: 8, flexGrow: 1}}
+                    contentStyle={{paddingVertical: 8}}
+                    disabled={isScanning || isUploading}
+                >
+                    Scan Document
+                </Button>
+                
+                <Button 
+                    mode="outlined"
+                    icon="upload-outline"
+                    onPress={() => {
+                        handleUploadDocument();
+                        setAddDocumentModalVisible(false);
+                    }}
+                    style={{margin: 8, flexGrow: 1}}
+                    contentStyle={{paddingVertical: 8}}
+                    disabled={isScanning || isUploading}
+                >
+                    Upload Document
+                </Button>
+            </View>
+            
+            <Button 
+                onPress={() => setAddDocumentModalVisible(false)}
+                style={{marginTop: 16}}
+            >
+                Cancel
+            </Button>
+         </Modal>
 
          <Dialog
             visible={deleteDialogVisible}
             onDismiss={() => setDeleteDialogVisible(false)}
-            style={{ 
-              borderRadius: BASE_GRID, 
-              backgroundColor: theme.colors.surface
-            }}
+            style={{ backgroundColor: theme.colors.surfaceVariant, borderRadius: BASE_GRID * 2 }}
           >
-            <Dialog.Title>Delete Document</Dialog.Title>
+           <Dialog.Icon icon="alert-circle-outline" color={theme.colors.error} size={30}/>
+           <Dialog.Title style={styles.dialogTitle}>Delete Document?</Dialog.Title>
             <Dialog.Content>
-              <Text variant="bodyMedium">
-                 Are you sure you want to delete "{selectedDocument?.title}"? This action cannot be undone.
+             <Text variant="bodyMedium" style={{color: theme.colors.onSurfaceVariant}}>
+                Are you sure you want to delete "{selectedDocumentMenu?.display_name || 'this document'}"? This action cannot be undone.
               </Text>
             </Dialog.Content>
             <Dialog.Actions>
-              <Button onPress={() => setDeleteDialogVisible(false)}>Cancel</Button>
-              <Button textColor={theme.colors.error} onPress={handleDeleteConfirm}>Delete</Button>
+             <Button onPress={() => setDeleteDialogVisible(false)} labelStyle={{color: theme.colors.primary}}>Cancel</Button>
+             <Button onPress={handleDeleteConfirm} labelStyle={{color: theme.colors.error}}>Delete</Button>
             </Dialog.Actions>
          </Dialog>
 
           <Dialog
              visible={renameDialogVisible}
              onDismiss={closeRenameDialog}
-             style={{ 
-               borderRadius: BASE_GRID, 
-               backgroundColor: theme.colors.surface
-             }}
+            style={{ backgroundColor: theme.colors.surfaceVariant, borderRadius: BASE_GRID * 2 }}
            >
-             <Dialog.Title>Rename Document</Dialog.Title>
+            <Dialog.Title style={styles.dialogTitle}>Rename Document</Dialog.Title>
              <Dialog.Content>
                <PaperTextInput
-                 label="New name"
+                  label="New Name"
                  value={newDocumentName}
                  onChangeText={setNewDocumentName}
                  mode="outlined"
+                  style={{backgroundColor: theme.colors.surface}}
                  autoFocus
-                 selectAllOnFocus
                />
              </Dialog.Content>
              <Dialog.Actions>
-               <Button onPress={closeRenameDialog}>Cancel</Button>
-               <Button 
-                 onPress={handleRenameSave} 
-                 disabled={!newDocumentName.trim() || newDocumentName.trim() === selectedDocument?.title}
-               >
-                 Save
-               </Button>
+              <Button onPress={closeRenameDialog} labelStyle={{color: theme.colors.primary}}>Cancel</Button>
+              <Button onPress={handleRenameSave} disabled={!newDocumentName.trim()} labelStyle={{color: theme.colors.primary}}>Save</Button>
              </Dialog.Actions>
            </Dialog>
 
@@ -328,7 +651,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20, // Make it a circle
     margin: 0, // Remove default margins if any
-    marginLeft: 'auto', // Point 1: Push button to the right
+    marginLeft: 'auto', // Add back marginLeft
   },
   searchContainerMargin: { 
      marginTop: BASE_GRID * 2, // Point 8: Header to search: 16px (Now handled by this margin)
@@ -383,5 +706,14 @@ const styles = StyleSheet.create({
      fontWeight: '400',
      color: '#6B7280', // Muted text
      marginTop: BASE_GRID * 2, // 16px
+  },
+  emptySubText: {
+      fontSize: 14,
+      color: 'gray', // Example color
+      marginTop: BASE_GRID,
+      textAlign: 'center',
+  },
+  dialogTitle: {
+     textAlign: 'center',
   },
 }); 

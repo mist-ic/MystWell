@@ -274,7 +274,7 @@ export default function HomeScreen() {
               <QuickActionCard
                 title="Add Document"
                 description="Manage medical documents"
-                icon="file-document"
+                icon="file-plus-outline"
                 onPress={() => router.push('/document')}
               />
               <QuickActionCard
@@ -343,12 +343,12 @@ export default function HomeScreen() {
           actions={[
             {
               // Try filled icon version
-              icon: 'file-document-plus', 
+              icon: 'file-plus-outline', 
               label: 'Add Document',
               onPress: () => router.push('/document'), 
               style: styles.fabAction, 
               labelTextColor: theme.colors.onSurface, 
-              color: theme.colors.primary, // Set icon color explicitly
+              color: theme.colors.tertiaryContainer,
             },
             {
               icon: 'bell-plus-outline',

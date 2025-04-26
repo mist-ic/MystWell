@@ -9,6 +9,7 @@ import { MigrationModule } from './supabase/migration.module';
 import { BullModule } from '@nestjs/bullmq';
 import { PrescriptionModule } from './prescription/prescription.module';
 import { ProfileModule } from './profile/profile.module';
+import { DocumentModule } from './document/document.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ProfileModule } from './profile/profile.module';
     AuthModule,
     PrescriptionModule,
     ProfileModule,
+    DocumentModule,
   ],
   controllers: [AppController],
   providers: [AppService],
