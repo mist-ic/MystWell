@@ -15,7 +15,7 @@ import { deleteRecording } from '../../services/recordingService';
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
 // const API_BASE_URL = 'http://172.31.231.222:3000'; // Use the provided IP and default port
-const API_BASE_URL = 'http://localhost:3000'; // Changed to localhost
+const API_BASE_URL = 'https://mystwell.me';
 
 // --- Types ---
 // Define Recording type based on backend structure

@@ -27,11 +27,20 @@ async function bootstrap() {
   SwaggerModule.setup('api-docs', app, document);
   console.log('Swagger UI available at /api-docs');
   
-  const frontendUrl = 'http://localhost:8081';
-  console.log(`Configuring CORS for origin: ${frontendUrl}`);
+  // Configure CORS for production and development environments
+  const allowedOrigins = [
+    'https://mystwell.me',
+    'https://www.mystwell.me',
+    'http://localhost:8081',
+    'http://localhost:19006', // Expo web development
+    'exp://*',                // Expo development
+    'capacitor://*'          // Capacitor (if used)
+  ];
+  
+  console.log(`Configuring CORS for origins: ${allowedOrigins.join(', ')}`);
   
   app.enableCors({
-    origin: frontendUrl,
+    origin: allowedOrigins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true, // Allow cookies if needed for auth
   }); 
@@ -41,6 +50,6 @@ async function bootstrap() {
   
   await app.listen(port, host);
   console.log(`Application is running on: http://localhost:${port} and potentially other interfaces`);
-  console.log(`Accepting requests from: ${frontendUrl}`);
+  console.log(`Accepting requests from allowed origins`);
 }
 bootstrap();
