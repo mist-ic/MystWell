@@ -27,8 +27,8 @@ export interface Recording {
   // Add any other relevant fields from your backend API
 }
 
-// Placeholder for API interaction
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'; // Replace with your actual backend URL
+// API base URL
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me'; // Using production URL as default
 
 /**
  * Fetches a specific recording by its ID from the backend.

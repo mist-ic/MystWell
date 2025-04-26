@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Platform, ListRenderItem, ActivityIndicator, Alert } from 'react-native';
-import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog } from 'react-native-paper';
+import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog, Searchbar, SegmentedButtons } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -15,7 +15,7 @@ import { deleteRecording } from '../../services/recordingService';
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
 // const API_BASE_URL = 'http://172.31.231.222:3000'; // Use the provided IP and default port
-const API_BASE_URL = 'http://localhost:3000'; // Changed to localhost
+const API_BASE_URL = 'https://mystwell.me';
 
 // --- Types ---
 // Define Recording type based on backend structure
@@ -784,7 +784,7 @@ function RecordScreenContent() {
   }, [recordingToDelete, session, fetchRecordings]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
       <StatusBar style={Platform.OS === 'ios' ? 'light' : theme.dark ? 'light' : 'dark'} />
       <AppHeader title="Recordings" />
 
@@ -817,7 +817,7 @@ function RecordScreenContent() {
       />
 
       {/* Recording Control Area */}
-      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.elevation.level2 }]}>
+      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.background }]}>
         {isRecording && (
           <View style={styles.timerStatusContainer}>
             <Text style={[styles.timerText, { color: theme.colors.onSurface }]}>{recordingTime}</Text>
@@ -886,12 +886,96 @@ function RecordScreenContent() {
 
 // --- Styles ---
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
   container: {
     flex: 1,
-    padding: 10,
+  },
+  header: {
+    padding: 16,
+  },
+  searchBar: {
+    elevation: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    height: 48,
+  },
+  searchInput: {
+    fontSize: 16,
+  },
+  filterContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  filterButtons: {
+    backgroundColor: 'transparent',
+  },
+  filterButton: {
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  recordingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#7C3AED',
+    margin: 16,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  timerText: {
+    fontSize: 48,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginBottom: 32,
+  },
+  recordButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#E11D48',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  recordButtonInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  transcriptionContainer: {
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    margin: 16,
+    marginTop: 0,
+  },
+  transcriptionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  transcriptionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#4B5563',
+  },
+  summaryContainer: {
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    margin: 16,
+    marginTop: 0,
+  },
+  flex: {
+    flex: 1,
   },
   listContentContainer: {
     paddingBottom: 180, // Ensure space for controls
@@ -974,11 +1058,6 @@ const styles = StyleSheet.create({
       alignItems: 'center',
       marginBottom: 10,
   },
-  timerText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
   statusText: {
     fontSize: 14,
   },
@@ -987,17 +1066,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     width: '100%',
-  },
-  recordButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
   },
   controlButton: {
     padding: 10,

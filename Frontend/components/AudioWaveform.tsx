@@ -4,14 +4,14 @@ import { useTheme } from 'react-native-paper';
 
 interface AudioWaveformProps {
   isRecording: boolean;
-  audioLevel?: number; // Value between 0 and 1
+  audioLevel?: number;
 }
 
-const NUM_BARS = 30;
-const BAR_WIDTH = 4;
-const BAR_GAP = 4;
+const NUM_BARS = 40;
+const BAR_WIDTH = 3;
+const BAR_GAP = 3;
 const MIN_HEIGHT = 4;
-const MAX_HEIGHT = 48;
+const MAX_HEIGHT = 40;
 
 export const AudioWaveform: React.FC<AudioWaveformProps> = ({ isRecording, audioLevel = 0 }) => {
   const theme = useTheme();
@@ -21,39 +21,49 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({ isRecording, audio
 
   useEffect(() => {
     if (isRecording) {
-      // Animate bars continuously while recording
-      const animations = animatedBars.map((bar, index) => {
-        const randomHeight = MIN_HEIGHT + Math.random() * (MAX_HEIGHT - MIN_HEIGHT) * audioLevel;
-        const delay = index * (50 / NUM_BARS); // Stagger the animations
+      const createBarAnimation = (bar: Animated.Value, index: number) => {
+        const randomFactor = 0.3 + Math.random() * 0.7; // Random between 0.3 and 1
+        const targetHeight = MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * audioLevel * randomFactor;
+        const duration = 400 + Math.random() * 200; // Random duration between 400-600ms
+        const delay = index * (1000 / NUM_BARS); // Staggered delay
 
         return Animated.sequence([
           Animated.timing(bar, {
-            toValue: randomHeight,
-            duration: 200,
+            toValue: targetHeight,
+            duration: duration,
             useNativeDriver: false,
           }),
           Animated.timing(bar, {
             toValue: MIN_HEIGHT,
-            duration: 200,
+            duration: duration,
             useNativeDriver: false,
           }),
         ]);
-      });
+      };
 
-      Animated.stagger(50, animations).start();
+      const startAnimations = () => {
+        const animations = animatedBars.map((bar, index) => createBarAnimation(bar, index));
+        Animated.stagger(50, animations).start(() => {
+          if (isRecording) {
+            startAnimations(); // Recursively start animations if still recording
+          }
+        });
+      };
+
+      startAnimations();
     } else {
       // Reset all bars when not recording
-      const resetAnimations = animatedBars.map(bar =>
-        Animated.timing(bar, {
-          toValue: MIN_HEIGHT,
-          duration: 200,
-          useNativeDriver: false,
-        })
-      );
-
-      Animated.parallel(resetAnimations).start();
+      Animated.parallel(
+        animatedBars.map(bar =>
+          Animated.timing(bar, {
+            toValue: MIN_HEIGHT,
+            duration: 300,
+            useNativeDriver: false,
+          })
+        )
+      ).start();
     }
-  }, [isRecording, audioLevel, animatedBars]);
+  }, [isRecording, audioLevel]);
 
   return (
     <View style={styles.container}>
@@ -63,9 +73,11 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({ isRecording, audio
           style={[
             styles.bar,
             {
-              backgroundColor: theme.colors.primary,
+              backgroundColor: '#FFFFFF',
               height: bar,
-              opacity: isRecording ? 1 : 0.5,
+              opacity: isRecording ? 0.8 : 0.4,
+              marginHorizontal: BAR_GAP / 2,
+              width: BAR_WIDTH,
             },
           ]}
         />
@@ -80,11 +92,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: MAX_HEIGHT,
+    marginVertical: 24,
     paddingHorizontal: 16,
   },
   bar: {
-    width: BAR_WIDTH,
-    marginHorizontal: BAR_GAP / 2,
     borderRadius: BAR_WIDTH / 2,
   },
 }); 

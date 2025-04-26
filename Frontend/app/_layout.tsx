@@ -11,6 +11,9 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { theme } from '@/theme';
 import { AuthProvider, useAuth } from '@/context/auth';
 
+// Import Inter fonts
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
+
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
 
@@ -38,25 +41,42 @@ function InitialLayout() {
     return <View style={{ flex: 1, backgroundColor: '#fff' }} />;
   }
 
+  // Note: Need to wait for fonts in RootLayout before rendering InitialLayout
+  // This component will now render conditionally based on font loading in RootLayout
   return <Slot />;
 }
 
 export default function RootLayout() {
-  const [loaded] = useFonts({
+  // Load fonts, including Inter
+  const [fontsLoaded, fontError] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    'Inter-Regular': Inter_400Regular,
+    'Inter-Medium': Inter_500Medium,
+    'Inter-SemiBold': Inter_600SemiBold,
   });
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    if (loaded) {
+    // Hide splash screen once fonts are loaded OR if there's an error
+    if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
-  }, [loaded]);
+  }, [fontsLoaded, fontError]);
 
-  if (!loaded) {
-    return null;
+  // Optional: Log font loading error
+  useEffect(() => {
+    if (fontError) {
+      console.error("Font Loading Error:", fontError);
+      // Potentially handle the error, e.g., show an error message
+    }
+  }, [fontError]);
+
+  // Render loading/null state until fonts are loaded (or error occurs)
+  if (!fontsLoaded && !fontError) {
+    return null; 
   }
 
+  // Fonts are loaded (or error handled), render the app
   return (
     <AuthProvider>
       <PaperProvider theme={theme}>

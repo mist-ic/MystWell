@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
-import { Text, TextInput, Button, HelperText } from 'react-native-paper';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { Text, TextInput, Button, HelperText, useTheme } from 'react-native-paper';
 import { Link } from 'expo-router';
 import { useAuth } from '../../context/auth';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -12,6 +13,10 @@ export default function ResetPasswordScreen() {
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
   const { resetPassword } = useAuth();
+  const theme = useTheme();
+
+  // Create styles inside the component using a memoized factory
+  const styles = React.useMemo(() => createStyles(theme), [theme]);
 
   const isEmailValid = () => EMAIL_REGEX.test(email);
 
@@ -33,7 +38,7 @@ export default function ResetPasswordScreen() {
       await resetPassword(email);
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Failed to send reset instructions. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -41,113 +46,159 @@ export default function ResetPasswordScreen() {
 
   if (sent) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
         <View style={styles.content}>
-          <Text variant="headlineMedium" style={styles.title}>
+          <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.onBackground }]}>
             Check Your Email
           </Text>
-          <Text style={styles.description}>
+          <Text style={[styles.description, { color: theme.colors.onSurfaceVariant }]}>
             We've sent password reset instructions to {email}. Please check your inbox.
           </Text>
-          <Text style={styles.note}>
-            If you don't see the email, please check your spam folder.
+          <Text style={[styles.note, { color: theme.colors.onSurfaceVariant }]}>
+            (Don't forget to check your spam folder)
           </Text>
-          <View style={styles.links}>
+          <View style={styles.linksContainer}>
             <Link href="/(auth)/login" asChild>
-              <Button mode="contained">
+              <Button 
+                mode="contained" 
+                style={styles.button}
+                labelStyle={styles.buttonLabel}
+                contentStyle={styles.buttonContent}
+                theme={{ roundness: 25 }}
+              >
                 Return to Login
               </Button>
             </Link>
           </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <View style={styles.content}>
-        <Text variant="headlineMedium" style={styles.title}>
-          Reset Password
-        </Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.flex}
+      >
+        <View style={styles.content}>
+          <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.onBackground }]}>
+            Reset Password
+          </Text>
 
-        <Text style={styles.description}>
-          Enter your email address and we'll send you instructions to reset your password.
-        </Text>
+          <Text style={[styles.description, { color: theme.colors.onSurfaceVariant }]}>
+            Enter your email address and we'll send you instructions to reset your password.
+          </Text>
 
-        {error ? (
-          <HelperText type="error" visible={!!error}>
-            {error}
-          </HelperText>
-        ) : null}
+          {error ? (
+            <Text style={[styles.error, { color: theme.colors.error }]}>
+              {error}
+            </Text>
+          ) : null}
 
-        <TextInput
-          label="Email"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          autoComplete="email"
-          keyboardType="email-address"
-          style={styles.input}
-          disabled={loading}
-        />
+          <TextInput
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            mode="outlined"
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            style={styles.input}
+            outlineStyle={styles.inputOutline}
+            left={<TextInput.Icon icon="email-outline" />}
+            disabled={loading}
+          />
 
-        <Button
-          mode="contained"
-          onPress={handleResetPassword}
-          loading={loading}
-          disabled={loading}
-          style={styles.button}
-        >
-          Send Reset Instructions
-        </Button>
+          <Button
+            mode="contained"
+            onPress={handleResetPassword}
+            loading={loading}
+            disabled={loading || !email}
+            style={styles.button}
+            labelStyle={styles.buttonLabel}
+            contentStyle={styles.buttonContent}
+            theme={{ roundness: 25 }}
+          >
+            Send Reset Instructions
+          </Button>
 
-        <View style={styles.links}>
-          <Link href="/login" asChild>
-            <Button mode="text">
-              Back to Login
-            </Button>
-          </Link>
+          <View style={styles.linksContainer}>
+            <Link href="/login" asChild>
+              <TouchableOpacity>
+                <Text style={[styles.linkText, { color: theme.colors.primary }]}>
+                  Back to Login
+                </Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+// Define the styles factory function outside the component
+const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+  },
+  flex: {
+    flex: 1,
   },
   content: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 24,
     justifyContent: 'center',
+    paddingBottom: 40,
   },
   title: {
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
+    fontWeight: 'bold',
   },
   description: {
     textAlign: 'center',
     marginBottom: 24,
     fontSize: 16,
+    lineHeight: 24,
   },
   note: {
     textAlign: 'center',
-    marginBottom: 24,
-    opacity: 0.7,
+    marginBottom: 32,
+    fontSize: 14,
   },
   input: {
     marginBottom: 16,
+    backgroundColor: theme.colors.surface,
+  },
+  inputOutline: {
+    borderRadius: 12,
+    borderWidth: 1.5,
   },
   button: {
+    marginTop: 8,
+    marginBottom: 24,
+    elevation: 2,
+  },
+  buttonLabel: {
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  buttonContent: {
+    paddingVertical: 8,
+  },
+  error: {
+    textAlign: 'center',
     marginBottom: 16,
+    fontSize: 14,
   },
-  links: {
+  linksContainer: {
     alignItems: 'center',
+    marginTop: 8,
   },
+  linkText: {
+    fontWeight: '500',
+    fontSize: 14,
+  }
 });
