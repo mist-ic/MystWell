@@ -15,7 +15,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 
 // Define API Base URL (TODO: Move to central config/env)
-const API_BASE_URL = 'https://mystwell.me';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
 
 // --- Constants based on Spec ---
 const PAGE_PADDING_HORIZONTAL = 24;
@@ -61,9 +61,9 @@ export default function DocumentScreen() {
   const [addDocumentModalVisible, setAddDocumentModalVisible] = useState(false);
 
   // --- Data Fetching --- 
-  const fetchDocuments = useCallback(async () => {
-    if (!session || !currentProfileId) return;
-    setIsLoading(true);
+  const fetchDocuments = useCallback(async (checkPolling = false): Promise<DocumentInfo[] | null> => {
+    if (!session || !currentProfileId) return null;
+    if (!checkPolling) setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/documents`, {
         headers: {
@@ -74,13 +74,24 @@ export default function DocumentScreen() {
          throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setDocuments(data as DocumentInfo[]); 
+      setDocuments(currentDocs => {
+          if (JSON.stringify(currentDocs) !== JSON.stringify(data)) {
+              return data as DocumentInfo[];
+          }
+          return currentDocs;
+      });
+      return data as DocumentInfo[];
     } catch (error) {
-      console.error("Error fetching documents:", error);
-      Alert.alert("Error", "Could not fetch documents.");
-      setDocuments([]);
+      if (!checkPolling) {
+          console.error("Error fetching documents:", error);
+          Alert.alert("Error", "Could not fetch documents.");
+          setDocuments([]);
+      } else {
+          console.warn("Polling fetch failed:", error);
+      }
+      return null;
     } finally {
-      setIsLoading(false);
+      if (!checkPolling) setIsLoading(false);
     }
   }, [session, currentProfileId]);
 
@@ -88,36 +99,69 @@ export default function DocumentScreen() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  // --- Polling for status updates ---
-  useEffect(() => {
-    if (!session || !currentProfileId) return; // Don't poll if not logged in
+  // --- Polling for status updates (Revised Logic) ---
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Check if any documents are in a processing state
-    const isProcessing = documents.some(doc => 
+  useEffect(() => {
+    // Function to start polling if needed
+    const startPolling = async () => {
+      console.log('Polling started for document status updates...');
+      pollingIntervalRef.current = setInterval(async () => {
+        console.log('Polling: fetching documents...');
+        const fetchedData = await fetchDocuments(true);
+
+        if (fetchedData) {
+          // Check if any documents in the fetched data are still processing
+          const stillProcessing = fetchedData.some(doc => 
+            ['queued', 'processing', 'processing_retried'].includes(doc.status)
+          );
+
+          if (!stillProcessing) {
+            console.log('Polling: No more documents processing, stopping poll.');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+          } else {
+            console.log('Polling: Documents still processing, poll continues.');
+          }
+        } else {
+          // Handle fetch error during polling - maybe stop polling?
+          console.warn('Polling: Fetch failed, stopping poll for now.');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+        }
+      }, 10000); // Poll every 10 seconds
+    };
+
+    // Check current documents state to decide IF polling should START
+    const needsPolling = documents.some(doc => 
         ['queued', 'processing', 'processing_retried'].includes(doc.status)
     );
 
-    let intervalId: NodeJS.Timeout | null = null;
-
-    if (isProcessing) {
-      console.log('Polling started for document status updates...');
-      intervalId = setInterval(() => {
-        console.log('Polling: fetching documents...');
-        fetchDocuments(); 
-      }, 10000); // Poll every 10 seconds
-    } else {
-      console.log('No documents processing, polling stopped.');
+    // If needs polling AND not already polling, start it
+    if (needsPolling && !pollingIntervalRef.current) {
+        startPolling();
+    }
+    // If no longer needs polling based on current state AND is polling, stop it 
+    // (This handles cases where status updated outside polling, e.g. after retry)
+    else if (!needsPolling && pollingIntervalRef.current) {
+        console.log('Polling: Stopping poll based on current state (no processing docs).');
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
     }
 
-    // Cleanup function to clear the interval when the component unmounts
-    // or when dependencies change (e.g., user logs out, or no longer processing)
+    // Cleanup function: stop polling when component unmounts or session changes
     return () => {
-      if (intervalId) {
-        console.log('Clearing polling interval.');
-        clearInterval(intervalId);
+      if (pollingIntervalRef.current) {
+        console.log('Clearing polling interval on cleanup.');
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
-  }, [session, currentProfileId, fetchDocuments, documents]); // Add documents as dependency
+  }, [session, documents, fetchDocuments]);
 
   // TODO: Implement real-time subscription for status updates (Alternative to polling)
   // Similar to Recording feature
@@ -531,7 +575,11 @@ export default function DocumentScreen() {
     return (
       <DocumentDetails
         document={selectedDocumentForView}
-        onBack={() => setSelectedDocumentForView(null)}
+        onBack={() => {
+            console.log('[DocumentScreen] Closing DocumentDetails view.');
+            setSelectedDocumentForView(null);
+        }}
+        onRefresh={fetchDocuments}
       />
     );
   }

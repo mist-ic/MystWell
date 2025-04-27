@@ -15,7 +15,7 @@ import { deleteRecording } from '../../services/recordingService';
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
 // const API_BASE_URL = 'http://172.31.231.222:3000'; // Use the provided IP and default port
-const API_BASE_URL = 'https://mystwell.me';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
 
 // --- Types ---
 // Define Recording type based on backend structure
@@ -370,7 +370,7 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
       const response = await fetch(`${API_BASE_URL}/recordings/${recording.id}/retranscribe`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.accessToken}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
       });
@@ -400,7 +400,6 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
         style={styles.cardContent}
         onPress={handleRecordingPress}
         disabled={isUpdating}
-        android_ripple={{ color: '#F3F4F6' }}
       >
         {/* Left Section (Icon and Play) */}
         <TouchableOpacity
@@ -736,15 +735,21 @@ function RecordScreenContent() {
       // Use state for title, provide a default if empty
       const titleToSend = searchQuery.trim() || recordingTitle.trim() || `Recording - ${new Date().toLocaleString()}`;
 
-      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, {
+      // Define fetch options
+      const fetchOptions = {
           method: 'POST',
           headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${session.access_token}`,
           },
-          // Send the actual title, keep duration 0 initially
-          body: JSON.stringify({ title: titleToSend, duration: 0 }), 
-      });
+          body: JSON.stringify({}), // Ensure body is empty object
+      };
+
+      // Add debug log
+      console.log('DEBUG: Fetching upload URL with options:', fetchOptions);
+
+      // Make the fetch call
+      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, fetchOptions);
 
       if (!uploadResponse.ok) {
           let errorMsg = 'Failed to prepare recording session';
@@ -1001,7 +1006,7 @@ function RecordScreenContent() {
   // Empty state for specific category
   const CategoryEmptyComponent = () => {
     let message = '';
-    let icon = 'text-box-outline';
+    let icon: keyof typeof MaterialCommunityIcons.glyphMap = 'text-box-outline'; 
     
     switch (activeTab) {
       case 'appointments':

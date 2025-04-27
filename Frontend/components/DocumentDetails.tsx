@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, Dimensions, Platform, BackHandler, TouchableOpacity, Animated, Pressable, Image, Alert } from 'react-native';
 import { Text, useTheme, Card, Button, Portal, Modal, Avatar, IconButton, ActivityIndicator, MD3Theme } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,12 +8,14 @@ import AppHeader from './AppHeader';
 import { useRouter, useNavigation } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/auth';
+import { WebView } from 'react-native-webview';
 
-const API_BASE_URL = 'https://mystwell.me';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
 
 interface DocumentDetailsProps {
   document: DocumentInfo;
   onBack: () => void;
+  onRefresh?: () => void;
 }
 
 const BASE_GRID = 8;
@@ -277,81 +279,139 @@ const triggerHaptic = () => {
 };
 
 const renderStructuredData = (data: any, theme: MD3Theme, styles: ReturnType<typeof createStyles>) => {
-    if (!data || typeof data !== 'object') {
-        return <Text style={{ fontStyle: 'italic', color: theme.colors.onSurfaceVariant }}>No details extracted.</Text>;
+  if (!data || typeof data !== 'object') {
+    return <Text style={styles.summaryBodyText}>No structured data available.</Text>;
+  }
+
+  const renderValue = (value: any, key: string, indentLevel = 0): React.ReactNode => {
+    const indentStyle = { paddingLeft: indentLevel * BASE_GRID * 2 };
+
+    if (value === null || value === undefined) {
+      return <Text style={[styles.summaryBodyText, indentStyle, { color: theme.colors.onSurfaceVariant }]}>N/A</Text>;
     }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return <Text style={[styles.summaryBodyText, indentStyle, { color: theme.colors.onSurfaceVariant }]}>None</Text>;
+      }
+      return value.map((item, index) => (
+        <View key={`${key}-${index}`} style={[styles.bulletPoint, indentStyle]}>
+          <Text style={styles.bullet}>•</Text>
+          {typeof item === 'object' ? (
+            renderValue(item, `${key}-${index}`, 0)
+          ) : (
+            <Text style={styles.bulletText}>{String(item)}</Text>
+          )}
+        </View>
+      ));
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value).map(([subKey, subValue]) => (
+        <View key={subKey} style={[{ marginTop: indentLevel > 0 ? 4 : 0 }, indentStyle]}>
+          <Text style={[styles.sectionLabel, { fontSize: 13, textTransform: 'capitalize' }]}>{subKey.replace(/_/g, ' ')}:</Text>
+          {renderValue(subValue, subKey, indentLevel + 1)}
+        </View>
+      ));
+    }
+    return <Text style={[styles.summaryBodyText, indentStyle]}>{String(value)}</Text>;
+  };
 
-    const renderValue = (value: any, keyPrefix: string = 'val') => {
-        if (value === null || value === undefined) return 'N/A';
-        if (Array.isArray(value)) {
-            if (value.length === 0) return 'None';
-            return value.map((item, index) => (
-                <View key={`${keyPrefix}-${index}`} style={{ marginBottom: 4 }}>
-                    {typeof item === 'object' ? (
-                        Object.entries(item).map(([k, v]) => (
-                            <Text key={k} style={styles.bulletText}>{`${k.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}: ${v ?? 'N/A'}`}</Text>
-                        ))
-                    ) : (
-                        <Text style={styles.bulletText}>- {String(item)}</Text>
-                    )}
-                </View>
-            ));
-        }
-        if (typeof value === 'object') {
-            return <Text>Object details not displayed</Text>;
-        }
-        return String(value);
-    };
+  const keyOrder = [
+    'detected_document_type',
+    'patient_name',
+    'provider_name',
+    'date_of_service',
+    'summary',
+    'key_information',
+    'medications_mentioned',
+    'follow_up_instructions',
+  ];
 
-    return Object.entries(data)
-        .filter(([key]) => key !== 'detected_document_type')
-        .map(([key, value]) => (
-            <View key={key} style={styles.summarySection}>
-                <Text variant="titleSmall" style={styles.sectionLabel}>
-                    {key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}:
-                </Text>
-                <View style={styles.dataValueContainer}>
-                  {renderValue(value, key)}
-                </View>
-            </View>
-        ));
+  const stringKeys = Object.keys(data).filter(k => typeof k === 'string');
+  const orderedKeys = keyOrder.filter(k => stringKeys.includes(k));
+  const otherKeys = stringKeys.filter(k => !keyOrder.includes(k));
+
+  return [...orderedKeys, ...otherKeys].map((key: string) => {
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+    return (
+      <View key={key} style={styles.summarySection}>
+        <Text style={styles.sectionLabel}>{label}:</Text>
+        {renderValue(data[key], key)}
+      </View>
+    );
+  });
 };
 
-export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
+interface StatusDisplay {
+    text: string;
+    color: string;
+    loading?: boolean;
+}
+
+const getStatusDisplayDetails = (status: DocumentInfo['status']): StatusDisplay => {
+    const cardStatus = getStatusDisplay(status);
+    if (!cardStatus) return { text: status, color: '#6B7280' }; 
+    return {
+        ...cardStatus,
+        text: status === 'processing_failed' ? 'Processing Failed' : cardStatus.text,
+        loading: cardStatus.loading ?? false,
+    };
+};
+
+export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetailsProps) {
   const theme = useTheme<MD3Theme>();
   const router = useRouter();
   const navigation = useNavigation();
   const { session } = useAuth();
   const [showFullDocument, setShowFullDocument] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const styles = React.useMemo(() => createStyles(theme), [theme]);
 
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!document || !session) return;
-      setIsLoadingImage(true);
-      try {
-        const response = await fetch(`${API_BASE_URL}/documents/${document.id}/view-url`, {
-            headers: { 'Authorization': `Bearer ${session.access_token}` }
-        });
-        if (!response.ok) {
-            throw new Error('Failed to fetch image URL');
-        }
-        const data = await response.json();
-        setImageUrl(data.downloadUrl);
-      } catch (error: any) {
-        console.error("Error fetching image URL:", error);
-        Alert.alert("Error", "Could not load document preview image.");
-        setImageUrl(null);
-      } finally {
-        setIsLoadingImage(false);
+  const statusDisplay = getStatusDisplayDetails(document.status);
+  const isReady = document.status === 'processed';
+  const isFailed = document.status === 'processing_failed';
+  const isProcessing = statusDisplay.loading;
+
+  const fetchPreviewDetails = useCallback(async () => {
+    if (!session?.access_token || !document.id) return;
+    console.log(`Fetching preview details for ${document.id}`);
+    setIsLoadingImage(true);
+    setImageUrl(null);
+    setMimeType(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/${document.id}/view-url`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+      if (!response.ok) {
+          let errorMsg = 'Failed to fetch preview URL';
+          try { errorMsg = (await response.json()).message || errorMsg; } catch(e){}
+          throw new Error(errorMsg);
       }
-    };
-    fetchImageUrl();
-  }, [document, session]);
+      const data = await response.json();
+      console.log(`Preview details received: URL=${data.downloadUrl}, MimeType=${data.mimeType}`);
+      setImageUrl(data.downloadUrl);
+      setMimeType(data.mimeType);
+    } catch (error: any) {
+      console.error("Error fetching preview details:", error);
+      Alert.alert("Error", `Could not load document preview. ${error.message}`);
+    } finally {
+      setIsLoadingImage(false);
+    }
+  }, [document.id, session]);
+
+  useEffect(() => {
+    if (isReady) {
+      fetchPreviewDetails();
+    }
+    return () => {
+        setImageUrl(null);
+        setMimeType(null);
+        setIsLoadingImage(false);
+    }
+  }, [document.id, isReady, fetchPreviewDetails]);
 
   useEffect(() => {
     const handleBack = () => {
@@ -379,14 +439,6 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
       unsubscribe();
     };
   }, [navigation, onBack, showFullDocument]);
-
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 500,
-      useNativeDriver: true,
-    }).start();
-  }, []);
 
   const documentSummary = {
     summary: "This document appears to be a medical prescription with the following details:",
@@ -416,12 +468,19 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
   };
 
   const handlePreviewPress = () => {
-    if (!imageUrl) {
-        Alert.alert("Image Unavailable", "The document preview could not be loaded.");
-        return;
+    if (imageUrl && mimeType?.startsWith('image/')) {
+      triggerHaptic();
+      setShowFullDocument(true);
+    } else if (imageUrl && mimeType === 'application/pdf') {
+        Alert.alert("Open PDF", "Opening PDF previews directly in the app is not fully supported yet. You can download it.");
+        triggerHaptic();
+    } else if (isReady && !isLoadingImage) {
+        fetchPreviewDetails(); 
+    } else if (!isReady) {
+        Alert.alert("Preview Not Available", "Document is still processing.")
+    } else {
+        Alert.alert("Preview Error", "Could not load document preview.")
     }
-    triggerHaptic();
-    setShowFullDocument(true);
   };
 
   const handleBackPress = () => {
@@ -430,134 +489,122 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
   };
 
   const handleRetry = async () => {
-       if (!document || !session || document.status !== 'processing_failed') return;
-       try {
-           const response = await fetch(`${API_BASE_URL}/documents/${document.id}/retry-processing`, {
-               method: 'POST',
-               headers: { 'Authorization': `Bearer ${session.access_token}` },
-           });
-           if (!response.ok) throw new Error('Failed to retry processing');
-           Alert.alert("Retry Initiated", "Document queued for processing again. Return to the list to see updates.");
-           onBack();
-       } catch (error: any) {
-           Alert.alert("Retry Failed", error.message || "Could not retry processing.");
-       }
-   };
+    if (!session?.access_token) {
+      Alert.alert("Error", "Authentication session not found.");
+      return;
+    }
+    setIsRetrying(true);
+    triggerHaptic();
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/${document.id}/retry-processing`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to retry processing.' }));
+        throw new Error(errorData.message || 'Failed to retry processing.');
+      }
+      Alert.alert("Success", "Document has been re-queued for processing.");
+      onRefresh?.();
+    } catch (error: any) {
+      console.error("Retry failed:", error);
+      Alert.alert("Retry Failed", error.message || "An unknown error occurred.");
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={[styles.pageContainer, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
-      <Animated.View style={[styles.headerContainer, { opacity: fadeAnim }]}>
-        <AppHeader 
-          title={document.display_name || 'Document Details'}
-          leftIcon="arrow-left"
-          onLeftPress={handleBackPress}
-          accessibilityLabelLeft="Go back to document list"
-        />
-      </Animated.View>
-
-      <ScrollView 
-        style={styles.scrollContainer} 
-        contentContainerStyle={styles.scrollContentContainer}
-      >
-        <Animated.View style={[styles.summaryCard, { opacity: fadeAnim }]}>
-          {isLoadingImage ? (
-            <ActivityIndicator style={styles.loader} color={theme.colors.primary} />
-          ) : (
-            <Pressable 
-              style={({ pressed }) => [
-                styles.summaryCardContent,
-                pressed && styles.pressedCard
-              ]}
-              onPress={handlePreviewPress}
-            >
-              <View style={styles.aiSummaryHeader}>
-                <View style={styles.aiHeaderLeft}>
-                  <MaterialCommunityIcons 
-                    name="text-box-search-outline"
-                    size={24} 
-                    color={theme.colors.primary}
-                    style={styles.aiIcon}
-                  />
-                  <View style={styles.aiSummaryTitle}>
-                    <Text style={styles.aiTitleText}>Extracted Information</Text>
-                    <Text style={styles.aiSubtitleText}>
-                      {document.detected_document_type || 'Details from document'}
-                    </Text>
-                  </View>
-                </View>
-                <Button
-                  mode="outlined"
-                  icon={({ size, color }) => (
-                    <MaterialCommunityIcons 
-                      name="message-processing" 
-                      size={16}
-                      color={color}
-                      style={styles.buttonIcon}
-                    />
-                  )}
-                  onPress={handleTalkToAI}
-                  style={[styles.talkAiButton, { borderColor: theme.colors.primary }]}
-                  labelStyle={[styles.talkAiButtonLabel, { color: theme.colors.primary }]}
-                  contentStyle={styles.talkAiButtonContent}
-                >
-                  Talk to AI
-                </Button>
-              </View>
-
-              <View style={styles.aiSummaryContent}>
-                {renderStructuredData(document.structured_data, theme, styles)}
-              </View>
-
-              {document.status === 'processing_failed' && (
-                <View style={styles.errorSection}>
-                    <MaterialCommunityIcons name="alert-circle-outline" color={theme.colors.error} size={20} style={{ marginRight: BASE_GRID }} />
-                    <Text style={[styles.errorText, { color: theme.colors.error }]}>
-                        Processing failed: {document.error_message || 'Unknown error'}
-                    </Text>
-                    <Button 
-                        mode="contained" 
-                        onPress={handleRetry}
-                        style={styles.retryButton}
-                        labelStyle={{ marginHorizontal: 0}}
-                        compact
-                    >
-                        Retry
-                    </Button>
-                </View>
-              )}
-            </Pressable>
+    <SafeAreaView style={styles.pageContainer} edges={['top', 'left', 'right']}>
+      <AppHeader title={document.display_name || "Document Details"} onBackPress={handleBackPress} />
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContentContainer}>
+        <View style={[styles.aiHeaderLeft, { marginBottom: BASE_GRID }]}>
+          <MaterialCommunityIcons 
+            name="text-box-search-outline"
+            size={24} 
+            color={theme.colors.primary}
+            style={styles.aiIcon}
+          />
+          <View style={styles.aiSummaryTitle}>
+            <Text style={styles.aiTitleText}>Extracted Information</Text>
+            <Text style={styles.aiSubtitleText}>
+              {document.detected_document_type || 'Details from document'}
+            </Text>
+          </View>
+        </View>
+        <Button
+          mode="outlined"
+          icon={({ size, color }) => (
+            <MaterialCommunityIcons 
+              name="message-processing" 
+              size={16}
+              color={color}
+              style={styles.buttonIcon}
+            />
           )}
-        </Animated.View>
+          onPress={handleTalkToAI}
+          style={[styles.talkAiButton, { borderColor: theme.colors.primary }]}
+          labelStyle={[styles.talkAiButtonLabel, { color: theme.colors.primary }]}
+          contentStyle={styles.talkAiButtonContent}
+        >
+          Talk to AI
+        </Button>
+
+        <View style={styles.aiSummaryContent}>
+          {renderStructuredData(document.structured_data, theme, styles)}
+        </View>
+
+        {document.status === 'processing_failed' && (
+          <View style={styles.errorSection}>
+              <MaterialCommunityIcons name="alert-circle-outline" color={theme.colors.error} size={20} style={{ marginRight: BASE_GRID }} />
+              <Text style={[styles.errorText, { color: theme.colors.error }]}>
+                  Processing failed: {document.error_message || 'Unknown error'}
+              </Text>
+              <Button 
+                  mode="contained" 
+                  onPress={handleRetry}
+                  style={styles.retryButton}
+                  labelStyle={{ marginHorizontal: 0}}
+                  compact
+                  loading={isRetrying}
+                  disabled={isRetrying}
+              >
+                  Retry Processing
+              </Button>
+          </View>
+        )}
 
         <View style={styles.previewSectionOuter}>
           <Text style={[styles.previewSectionTitle, { color: theme.colors.secondary }]}>Original Document</Text>
-          <Animated.View 
-            style={[
-              styles.previewCardContainer, 
-              { opacity: fadeAnim, transform: [{ scale: fadeAnim }] }
+          <Pressable 
+            onPress={handlePreviewPress} 
+            style={({ pressed }) => [
+              styles.previewCardContainer,
+              pressed && styles.pressedCard,
             ]}
-          >
+            disabled={isLoadingImage}
+           >
             {isLoadingImage ? (
-              <ActivityIndicator style={styles.loader} color={theme.colors.primary} />
-            ) : imageUrl ? (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.previewCard,
-                  pressed && styles.pressedCard
-                ]}
-                onPress={handlePreviewPress}
-              >
-                 <Image source={{ uri: imageUrl }} style={styles.previewImage} resizeMode="contain" />
-              </Pressable>
+                <ActivityIndicator style={styles.loader} size="large" />
+            ) : imageUrl && mimeType?.startsWith('image/') ? (
+                <Image source={{ uri: imageUrl }} style={styles.previewImage} resizeMode="contain" />
+            ) : imageUrl && mimeType === 'application/pdf' ? (
+                 <View style={[styles.previewCard, styles.previewPlaceholder]}>
+                    <MaterialCommunityIcons name="file-pdf-box" size={48} color={theme.colors.primary} style={styles.pdfIcon} />
+                   <Text style={[styles.previewLabel, { color: theme.colors.onSurfaceVariant }]}>PDF Document</Text>
+                   <Text style={[styles.aiSubtitleText, { textAlign: 'center' }]}>Tap to view (may open externally)</Text>
+                </View>
             ) : (
-              <View style={[styles.previewCard, styles.previewPlaceholder]}>
-                  <MaterialCommunityIcons name="image-off-outline" size={48} color={theme.colors.onSurfaceVariant} />
-                  <Text style={[styles.previewLabel, { color: theme.colors.onSurfaceVariant }]}>
-                    Preview unavailable
-                  </Text>
-              </View>
+                <View style={[styles.previewCard, styles.previewPlaceholder]}>
+                    <MaterialCommunityIcons name="file-alert-outline" size={48} color={theme.colors.onSurfaceVariant} style={styles.pdfIcon} />
+                   <Text style={[styles.previewLabel, { color: theme.colors.onSurfaceVariant }]}>
+                     {isProcessing ? "Processing..." : isReady ? "Preview Unavailable" : "Preview Error"}
+                   </Text>
+                </View>
             )}
-          </Animated.View>
+          </Pressable>
         </View>
 
         <View style={styles.actionsSection}>
@@ -569,7 +616,6 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
             labelStyle={styles.actionButtonLabel}
             contentStyle={styles.actionButtonContent}
             theme={{ roundness: BASE_GRID / theme.roundness }}
-            accessibilityLabel="Download document"
           >
             Download
           </Button>
@@ -581,7 +627,6 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
             labelStyle={styles.actionButtonLabel}
             contentStyle={styles.actionButtonContent}
             theme={{ roundness: BASE_GRID / theme.roundness }}
-            accessibilityLabel="Share document"
           >
             Share
           </Button>
@@ -590,7 +635,7 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
 
       <Portal>
         <Modal
-          visible={showFullDocument}
+          visible={showFullDocument && mimeType?.startsWith('image/')}
           onDismiss={() => setShowFullDocument(false)}
           contentContainerStyle={[
             styles.modalContainer,
@@ -614,4 +659,17 @@ export function DocumentDetails({ document, onBack }: DocumentDetailsProps) {
       </Portal>
     </SafeAreaView>
   );
-} 
+}
+
+const getStatusDisplay = (status: DocumentInfo['status']): StatusDisplay => {
+  switch (status) {
+    case 'pending_upload': return { text: 'Uploading', color: '#9CA3AF' };
+    case 'uploaded':
+    case 'queued': return { text: 'Queued', color: '#F59E0B' };
+    case 'processing':
+    case 'processing_retried': return { text: 'Processing...', color: '#3B82F6', loading: true };
+    case 'processed': return { text: 'Ready', color: '#10B981' };
+    case 'processing_failed': return { text: 'Processing Failed', color: '#EF4444' };
+    default: return { text: status, color: '#6B7280' };
+  }
+}; 

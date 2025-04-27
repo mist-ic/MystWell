@@ -14,12 +14,12 @@ const BASE_GRID = 8;
 
 const getStatusDisplay = (status: DocumentInfo['status']) => {
     switch (status) {
-        case 'pending_upload': return { text: 'Pending Upload', color: '#9CA3AF' };
-        case 'uploaded': return { text: 'Uploaded', color: '#6B7280' };
-        case 'queued': return { text: 'Queued for Processing', color: '#F59E0B' };
+        case 'pending_upload': return { text: 'Uploading', color: '#9CA3AF' };
+        case 'uploaded':
+        case 'queued': return { text: 'Queued', color: '#F59E0B' };
         case 'processing':
         case 'processing_retried': return { text: 'Processing...', color: '#3B82F6', loading: true };
-        case 'processed': return { text: 'Processed', color: '#10B981' };
+        case 'processed': return { text: 'Ready', color: '#10B981' };
         case 'processing_failed': return { text: 'Processing Failed', color: '#EF4444' };
         default: return { text: status, color: '#6B7280' };
     }
