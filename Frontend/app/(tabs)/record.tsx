@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Platform, ListRenderItem, ActivityIndicator, Alert } from 'react-native';
-import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog, Searchbar, SegmentedButtons } from 'react-native-paper';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { View, StyleSheet, FlatList, TouchableOpacity, Platform, ListRenderItem, ActivityIndicator, Alert, SectionList, ScrollView } from 'react-native';
+import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog, Searchbar, SegmentedButtons, Surface, Badge, IconButton, Chip } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -34,6 +34,8 @@ export interface Recording {
   metadata?: any;
   // Frontend-specific temporary state
   isPlaying?: boolean;
+  // Added for UI categorization
+  category?: 'Appointment' | 'Reminder' | 'Other';
 }
 
 interface RecordingItemProps {
@@ -41,16 +43,142 @@ interface RecordingItemProps {
   currentlyPlayingId: string | null;
   setCurrentlyPlayingId: (id: string | null) => void;
   showDeleteConfirmDialog: (id: string, title: string) => void;
+  setSnackbarMessage: (message: string) => void;
+  setSnackbarVisible: (visible: boolean) => void;
 }
+
+interface RecordingSection {
+  title: string;
+  data: Recording[];
+}
+
+// --- Utility Functions ---
+
+// Format a date for display in recording items - updated for better readability
+const formatItemDate = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString(undefined, { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return '';
+  }
+};
+
+// Format a date for display in section headers - updated to show "Today"/"Yesterday"
+const formatSectionDate = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  } catch {
+    return '';
+  }
+};
+
+// Format duration for display
+const formatDuration = (seconds: number): string => {
+  if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+// Group recordings by date
+const groupRecordingsByDate = (recordings: Recording[]): RecordingSection[] => {
+  // Sort recordings by date (newest first)
+  const sortedRecordings = [...recordings].sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  
+  // Group by date
+  const groupedRecordings: { [key: string]: Recording[] } = {};
+  
+  sortedRecordings.forEach(recording => {
+    try {
+      const date = new Date(recording.created_at);
+      const dateString = date.toDateString(); // Use date string as key
+      
+      if (!groupedRecordings[dateString]) {
+        groupedRecordings[dateString] = [];
+      }
+      
+      groupedRecordings[dateString].push(recording);
+    } catch (error) {
+      console.error('Error grouping recording by date:', error);
+    }
+  });
+  
+  // Convert to sections array
+  return Object.entries(groupedRecordings).map(([dateString, recordings]) => ({
+    title: formatSectionDate(dateString),
+    data: recordings
+  }));
+};
+
+// Categorize recordings (for demonstration purposes - replace with actual logic)
+const categorizeRecording = (recording: Recording): Recording => {
+  const title = recording.title?.toLowerCase() || '';
+  const transcript = recording.transcription?.toLowerCase() || '';
+  
+  // Simple categorization logic based on title or transcript content
+  // In a real app, this would use more sophisticated NLP or metadata
+  if (title.includes('appointment') || title.includes('doctor') || transcript.includes('appointment')) {
+    return { ...recording, category: 'Appointment' };
+  } else if (title.includes('reminder') || transcript.includes('remind')) {
+    return { ...recording, category: 'Reminder' };
+  } else {
+    return { ...recording, category: 'Other' };
+  }
+};
+
+// Get status information for a recording
+const getRecordingStatus = (status: string): { color: string; label: string } => {
+  switch (status) {
+    case 'completed':
+      return { color: '#10B981', label: 'Completed' };
+    case 'processing':
+    case 'transcribing_completed':
+    case 'queued':
+    case 'pending_upload':
+    case 'uploaded':
+      return { color: '#EAB308', label: 'Processing' };
+    case 'failed':
+    case 'transcription_failed':
+    case 'analysis_failed':
+    case 'download_failed':
+      return { color: '#EF4444', label: 'Failed' };
+    default:
+      return { color: '#6B7280', label: status };
+  }
+};
 
 // --- Components ---
 
-// Recording Item Component (Adapted for backend data)
+// Recording Item Component
 const RecordingItem: React.FC<RecordingItemProps> = React.memo(({ 
     recording, 
     currentlyPlayingId, 
     setCurrentlyPlayingId,
-    showDeleteConfirmDialog
+    showDeleteConfirmDialog,
+    setSnackbarMessage,
+    setSnackbarVisible
 }) => {
   const theme = useTheme();
   const router = useRouter();
@@ -61,8 +189,11 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const { session } = useAuth();
   const soundRef = useRef<Audio.Sound | null>(null);
+  const [isReTranscribing, setIsReTranscribing] = useState(false);
 
   const isPlaying = currentlyPlayingId === recording.id;
+  const status = getRecordingStatus(recording.status);
+  const category = recording.category || 'Other';
 
   // Function to unload the sound safely
   const unloadSound = useCallback(async () => {
@@ -110,7 +241,7 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
       }
       
       console.log("Title updated successfully for:", recording.id);
-    setIsEditModalVisible(false);
+      setIsEditModalVisible(false);
     } catch (error: any) {
       console.error("Error updating title:", error);
       Alert.alert("Error", error.message || "Failed to update recording name.");
@@ -120,45 +251,32 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
   }, [recording.id, recording.title, editedTitle, session]);
 
   const handleRecordingPress = useCallback(() => {
-    // Navigate to detail screen, passing only the ID
-    // The detail screen will fetch full details using the ID
+    // Navigate to detail screen
     router.push({
       pathname: `/recording/[id]`, 
-      params: { id: recording.id } // Pass only ID
+      params: { id: recording.id }
     });
   }, [recording.id, router]);
 
-  // Playback Handler
   const handlePlayPause = useCallback(async () => {
     if (!session) {
       Alert.alert("Authentication Required", "Please log in to play recordings.");
       return;
     }
 
-    if (isLoadingPlayback) return; // Prevent double taps while loading
+    if (isLoadingPlayback) return; // Prevent multiple clicks while loading
 
-    // If this item is already playing, stop it
+    // If this recording is already playing, stop it
     if (isPlaying) {
-      console.log("Stopping playback for:", recording.id);
-      setIsLoadingPlayback(true);
-      await unloadSound();
+      // Cancel action
       setCurrentlyPlayingId(null);
-      setIsLoadingPlayback(false);
+      await unloadSound();
       return;
     }
-
-    // Stop any other currently playing sound before starting new one
-    if (currentlyPlayingId && currentlyPlayingId !== recording.id) {
-         console.log("Stopping previous sound before playing new one.");
-         // We rely on the main component to handle stopping the *other* sound instance
-         setCurrentlyPlayingId(recording.id); // Signal intent to play this one
-         // Ideally, the parent component would have a way to directly stop the other soundRef
-         // For now, setting the ID will cause the other item to stop in its own effect/logic
-    } else {
-        setCurrentlyPlayingId(recording.id);
-    }
-
+    
+    // Stop any other playing recording first
     setIsLoadingPlayback(true);
+    setCurrentlyPlayingId(recording.id);
 
     try {
       console.log("Requesting playback URL for:", recording.id);
@@ -205,120 +323,205 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     } finally {
       setIsLoadingPlayback(false);
     }
-  }, [recording.id, session, isPlaying, currentlyPlayingId, setCurrentlyPlayingId, isLoadingPlayback]);
+  }, [recording.id, session, isPlaying, currentlyPlayingId, setCurrentlyPlayingId, isLoadingPlayback, unloadSound]);
 
-  // --- Modified Delete Handler: Trigger Parent Dialog --- 
+  // Delete Handler
   const handleDeleteRequest = useCallback(() => {
-    // console.log(`[List Item ${recording.id}] handleDeleteRequest called`);
     setMenuVisible(false); 
     showDeleteConfirmDialog(recording.id, recording.title || 'this recording');
   }, [recording.id, recording.title, showDeleteConfirmDialog]);
-  // --- End Modified Delete Handler ---
-
-  const formatDate = (dateString: string) => {
-    try {
-        // Use more user-friendly formatting
-        return new Date(dateString).toLocaleDateString(undefined, { 
-            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-        });
-    } catch {
-        return dateString; // Fallback
-    }
-  }
-  
-  const formatDuration = (seconds: number) => {
-      if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
 
   const openMenu = () => setMenuVisible(true);
   const closeMenu = () => setMenuVisible(false);
 
+  // Get the appropriate icon for the recording category
+  const getCategoryIcon = () => {
+    switch (category) {
+      case 'Appointment':
+        return 'calendar';
+      case 'Reminder':
+        return 'bell';
+      default:
+        return 'text-box-outline';
+    }
+  };
+
+  // Get the appropriate background color for the icon container
+  const getCategoryColor = () => {
+    switch (category) {
+      case 'Appointment':
+        return '#EFF6FF';
+      case 'Reminder':
+        return '#FEF3C7';
+      default:
+        return '#F3F4F6';
+    }
+  };
+
+  // Handle Re-transcribe function
+  const handleReTranscribe = useCallback(async () => {
+    if (!session?.user) {
+      router.push("/login");
+      return;
+    }
+    
+    setIsReTranscribing(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/recordings/${recording.id}/retranscribe`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to re-transcribe recording');
+      }
+      
+      setSnackbarMessage('Re-transcription started. This may take a moment.');
+      setSnackbarVisible(true);
+    } catch (error) {
+      console.error('Error re-transcribing:', error);
+      setSnackbarMessage('Failed to re-transcribe recording.');
+      setSnackbarVisible(true);
+    } finally {
+      setIsReTranscribing(false);
+      closeMenu();
+    }
+  }, [recording.id, session, router, setSnackbarMessage, setSnackbarVisible, closeMenu]);
+
   return (
-    <TouchableOpacity 
-      style={[styles.itemContainer, { backgroundColor: theme.colors.surfaceVariant }]}
-      onPress={handleRecordingPress}
-      disabled={isUpdating}
+    <Surface 
+      style={[styles.cardContainer, { backgroundColor: '#FFFFFF' }]} 
+      elevation={1}
     >
-      <View style={styles.itemContentContainer}>
-        <TouchableOpacity onPress={handlePlayPause} disabled={isLoadingPlayback} style={styles.playButton}>
+      <TouchableOpacity 
+        style={styles.cardContent}
+        onPress={handleRecordingPress}
+        disabled={isUpdating}
+        android_ripple={{ color: '#F3F4F6' }}
+      >
+        {/* Left Section (Icon and Play) */}
+        <TouchableOpacity
+          style={[styles.iconContainer, { backgroundColor: getCategoryColor() }]}
+          onPress={handlePlayPause}
+          disabled={isLoadingPlayback}
+          hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+        >
           {isLoadingPlayback ? (
             <ActivityIndicator size="small" color={theme.colors.primary} />
           ) : (
-            <MaterialCommunityIcons 
-              name={isPlaying ? "pause-circle" : "play-circle"} 
-              size={36} 
-              color={theme.colors.primary}
-            />
+            <>
+              <MaterialCommunityIcons 
+                name={getCategoryIcon()} 
+                size={16} 
+                color="#4F46E5"
+                style={styles.categoryIcon}
+              />
+              <MaterialCommunityIcons 
+                name={isPlaying ? "pause" : "play"} 
+                size={20} 
+                color="#4F46E5"
+                style={styles.playIcon}
+              />
+            </>
           )}
         </TouchableOpacity>
-
-        <View style={styles.itemTextContainer}>
-          <Text variant="titleMedium" numberOfLines={1} style={styles.itemTitle}>
+        
+        {/* Middle Section (Text) */}
+        <View style={styles.textContainer}>
+          <Text style={styles.titleText} numberOfLines={1}>
             {recording.title || 'Untitled Recording'}
           </Text>
-          <Text variant="bodySmall" style={styles.itemDetail}>
-            {formatDate(recording.created_at)} • {formatDuration(recording.duration ?? 0)} • {recording.status}
+          <Text style={styles.metaText}>
+            {formatSectionDate(recording.created_at)} • {formatItemDate(recording.created_at)} • {formatDuration(recording.duration || 0)}
           </Text>
         </View>
-
-        {isUpdating && (
-          <ActivityIndicator size="small" color={theme.colors.primary} style={styles.itemLoadingIndicator || { marginLeft: 8 }} />
-        )}
-
-        <Menu
-          visible={menuVisible}
-          onDismiss={closeMenu}
-          anchor={
-            <TouchableOpacity onPress={openMenu} style={styles.menuButton} disabled={isUpdating}>
-              <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.colors.onSurfaceVariant} />
-            </TouchableOpacity>
-          }
-          anchorPosition="bottom"
-        >
-          <Menu.Item 
-            onPress={() => { closeMenu(); setIsEditModalVisible(true); }} 
-            title="Rename" 
-            leadingIcon="pencil-outline"
-          />
-          <Divider />
-          <Menu.Item 
-            onPress={handleDeleteRequest} 
-            title="Delete" 
-            leadingIcon="delete-outline" 
-            titleStyle={{ color: theme.colors.error }}
-          />
-        </Menu>
-      </View>
-
+        
+        {/* Right Section (Status and Menu) */}
+        <View style={styles.rightSection}>
+          {isUpdating ? (
+            <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 12 }} />
+          ) : (
+            <Chip 
+              style={[styles.statusChip, { backgroundColor: `${status.color}10` }]}
+              textStyle={{ color: status.color, fontSize: 12, fontWeight: '500' }}
+            >
+              {status.label}
+            </Chip>
+          )}
+          
+          <Menu
+            visible={menuVisible}
+            onDismiss={closeMenu}
+            anchor={
+              <IconButton
+                icon="dots-vertical"
+                size={24}
+                onPress={openMenu}
+                iconColor="#6B7280"
+                style={styles.menuButton}
+              />
+            }
+            contentStyle={{ backgroundColor: 'white' }}
+          >
+            <Menu.Item 
+              onPress={() => {
+                closeMenu();
+                setIsEditModalVisible(true);
+              }} 
+              title="Rename" 
+              leadingIcon="pencil"
+            />
+            <Menu.Item 
+              onPress={handleReTranscribe}
+              title="Re-transcribe" 
+              leadingIcon="refresh"
+              disabled={isReTranscribing}
+            />
+            <Menu.Item 
+              onPress={handleDeleteRequest} 
+              title="Delete" 
+              leadingIcon="delete"
+            />
+          </Menu>
+        </View>
+      </TouchableOpacity>
+      
+      {/* Edit Modal */}
       <Portal>
-        <Modal visible={isEditModalVisible} onDismiss={() => setIsEditModalVisible(false)} contentContainerStyle={[styles.modalContainer, {backgroundColor: theme.colors.background}]}>
-          <Text variant="headlineSmall" style={styles.modalTitle}>Rename Recording</Text>
+        <Modal
+          visible={isEditModalVisible}
+          onDismiss={() => setIsEditModalVisible(false)}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
+        >
+          <Text style={[styles.modalTitle, { color: theme.colors.onSurface }]}>Edit Recording Title</Text>
           <TextInput
-            label="New Title"
             value={editedTitle}
             onChangeText={setEditedTitle}
             mode="outlined"
             style={styles.input}
+            disabled={isUpdating}
           />
           <View style={styles.modalActions}>
-            <Button onPress={() => setIsEditModalVisible(false)}>Cancel</Button>
-            <Button 
-              mode="contained" 
-              onPress={handleSaveTitle} 
-              loading={isUpdating} 
-              disabled={isUpdating || !editedTitle || editedTitle === recording.title}
-            >
-              Save
-            </Button>
+            <Button onPress={() => setIsEditModalVisible(false)} disabled={isUpdating}>Cancel</Button>
+            <Button onPress={handleSaveTitle} mode="contained" loading={isUpdating} disabled={isUpdating}>Save</Button>
           </View>
         </Modal>
       </Portal>
-    </TouchableOpacity>
+    </Surface>
   );
 });
+
+// Section Header Component for Date Grouping
+const SectionHeader: React.FC<{ title: string }> = ({ title }) => {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderText}>{title}</Text>
+    </View>
+  );
+};
 
 // Main Screen Component
 export default function RecordScreen() {
@@ -332,6 +535,8 @@ export default function RecordScreen() {
 function RecordScreenContent() {
   const theme = useTheme();
   const { session } = useAuth(); // Get session for auth token
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
 
   // Input State
   const [recordingTitle, setRecordingTitle] = useState(''); // State for title input
@@ -358,13 +563,12 @@ function RecordScreenContent() {
   // Playback State
   const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
 
-  // --- Dialog State (New) ---
+  // --- Dialog State ---
   const [confirmDialogVisible, setConfirmDialogVisible] = useState(false);
   const [recordingToDelete, setRecordingToDelete] = useState<{id: string; title: string} | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false); // Add deleting state here
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const showDeleteConfirmDialog = useCallback((id: string, title: string) => {
-    // console.log(`[RecordScreen] showDeleteConfirmDialog called for ID: ${id}, Title: ${title}`);
     setRecordingToDelete({ id, title });
     setConfirmDialogVisible(true);
   }, []);
@@ -378,8 +582,6 @@ function RecordScreenContent() {
 
   const fetchRecordings = useCallback(async () => {
     if (!session) {
-      // Don't show error if simply not logged in, just show empty state
-      // setListError("Not authenticated"); 
       setIsLoadingList(false);
       setRecordings([]); 
       return;
@@ -406,10 +608,12 @@ function RecordScreenContent() {
       }
 
       const data: Recording[] = await response.json();
-      // Add isPlaying state locally if needed for UI
-      console.log("Raw API response:", JSON.stringify(data));
-      setRecordings(data.map(r => ({ ...r, isPlaying: false }))); 
-      console.log("Recordings fetched:", data.length);
+      // Process recordings data - add categories for UI
+      const processedRecordings = data.map(recording => 
+        categorizeRecording({ ...recording, isPlaying: false })
+      );
+      setRecordings(processedRecordings);
+      console.log("Recordings fetched:", processedRecordings.length);
     } catch (error: any) {
       console.error("Error fetching recordings:", error);
       setListError(error.message || "Failed to fetch recordings.");
@@ -530,7 +734,7 @@ function RecordScreenContent() {
       // 2. Get Upload URL and create metadata entry
       console.log("Requesting upload URL...");
       // Use state for title, provide a default if empty
-      const titleToSend = recordingTitle.trim() || `Recording - ${new Date().toLocaleString()}`;
+      const titleToSend = searchQuery.trim() || recordingTitle.trim() || `Recording - ${new Date().toLocaleString()}`;
 
       const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, {
           method: 'POST',
@@ -673,6 +877,9 @@ function RecordScreenContent() {
       await updateApiRecordingStatus(recordingId, 'uploaded', undefined, durationSeconds); 
 
       setSnackbarMessage('Recording saved successfully!');
+      // Clear the search query after successful recording
+      setSearchQuery('');
+      setRecordingTitle('');
 
     } catch (error: any) {
       console.error('Error stopping or uploading recording:', error);
@@ -722,60 +929,27 @@ function RecordScreenContent() {
     setSnackbarMessage('Recording cancelled.');
     setSnackbarVisible(true);
   };
-  
+
   // --- UI Rendering ---
 
-  const renderRecordingItem: ListRenderItem<Recording> = useCallback(({ item }) => (
-    <RecordingItem 
-      recording={item}
-      currentlyPlayingId={currentlyPlayingId}
-      setCurrentlyPlayingId={setCurrentlyPlayingId}
-      showDeleteConfirmDialog={showDeleteConfirmDialog} 
-    />
-  ), [currentlyPlayingId, showDeleteConfirmDialog]);
-
-  const ListEmptyComponent = () => {
-    console.log("ListEmptyComponent rendering with state:", { isLoadingList, listError, sessionExists: !!session }); 
-    return (
-      <View style={styles.emptyContainer}>
-          {isLoadingList ? (
-              <ActivityIndicator size="large" color={theme.colors.primary}/>
-          ) : listError ? (
-              <>
-                <Text style={[styles.emptyText, {color: theme.colors.error}]}>Error: {listError}</Text>
-                <Button onPress={fetchRecordings} mode="outlined">Retry</Button>
-              </>
-          ) : !session ? (
-               <Text style={styles.emptyText}>Please log in to view recordings.</Text>
-          ) : (
-               <Text style={styles.emptyText}>No recordings yet. Press the mic to start!</Text>
-          )}
-      </View>
-    );
-  };
-
-  // --- Execute Delete from Dialog --- 
+  // Execute Delete from Dialog
   const executeDelete = useCallback(async () => {
     if (!recordingToDelete || !session?.access_token) {
-      // console.log("[RecordScreen] Execute delete called without target or token.");
       hideConfirmDialog();
       return;
     }
     
     const { id: recordingId } = recordingToDelete;
     hideConfirmDialog(); 
-    // console.log(`[RecordScreen] Confirmed delete via Dialog for ${recordingId}, proceeding...`);
     setIsDeleting(true); 
     
     try {
-      // console.log(`[RecordScreen] Calling deleteRecording service for ${recordingId}...`);
       await deleteRecording(recordingId, session.access_token);
-      // console.log(`[RecordScreen] Delete service call successful for ${recordingId}.`);
       setSnackbarMessage('Recording deleted successfully.');
       setSnackbarVisible(true);
       fetchRecordings(); 
     } catch (error: any) {
-      console.error(`[RecordScreen] Error deleting recording ${recordingId}:`, error); // Keep error log
+      console.error(`Error deleting recording ${recordingId}:`, error);
       setSnackbarMessage(error.message || "Failed to delete recording.");
       setSnackbarVisible(true);
     } finally {
@@ -783,102 +957,257 @@ function RecordScreenContent() {
     }
   }, [recordingToDelete, session, fetchRecordings]);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar style={Platform.OS === 'ios' ? 'light' : theme.dark ? 'light' : 'dark'} />
-      <AppHeader title="Recordings" />
+  // Filter recordings based on search and active tab
+  const filteredRecordings = useMemo(() => {
+    // First filter by search query
+    let filtered = recordings;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(recording => 
+        recording.title?.toLowerCase().includes(query) || 
+        recording.transcription?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Then filter by active tab
+    if (activeTab !== 'all') {
+      const category = activeTab === 'appointments' 
+        ? 'Appointment' 
+        : activeTab === 'reminders' 
+        ? 'Reminder' 
+        : 'Other';
+      
+      filtered = filtered.filter(recording => recording.category === category);
+    }
+    
+    return filtered;
+  }, [recordings, searchQuery, activeTab]);
 
-      {/* Add Title Input Field Here */}
-      {!isRecording && (
-          <View style={styles.titleInputContainer}>
-              <TextInput
-                  label="Recording Title (Optional)"
-                  value={recordingTitle}
-                  onChangeText={setRecordingTitle}
-                  mode="outlined"
-                  style={styles.titleInput}
-                  disabled={isRecording || isLoadingList || isSaving}
-              />
-          </View>
-      )}
+  // Group recordings by date for section list
+  const groupedRecordings = useMemo(() => {
+    return groupRecordingsByDate(filteredRecordings);
+  }, [filteredRecordings]);
 
-      <FlatList
-        data={recordings}
-        renderItem={renderRecordingItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContentContainer}
-        ListEmptyComponent={ListEmptyComponent}
-        // Only show refresh control when not loading initially
-        refreshing={isLoadingList && recordings.length > 0} 
-        onRefresh={isDeleting ? undefined : fetchRecordings} 
-        // Add extraData to ensure re-render when currentlyPlayingId changes
-        extraData={currentlyPlayingId} 
-        scrollEnabled={!isDeleting}
-      />
+  // Count records by category for tab badges
+  const counts = useMemo(() => {
+    const all = recordings.length;
+    const appointments = recordings.filter(r => r.category === 'Appointment').length;
+    const reminders = recordings.filter(r => r.category === 'Reminder').length;
+    const others = recordings.filter(r => r.category === 'Other').length;
+    
+    return { all, appointments, reminders, others };
+  }, [recordings]);
 
-      {/* Recording Control Area */}
-      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.background }]}>
-        {isRecording && (
-          <View style={styles.timerStatusContainer}>
-            <Text style={[styles.timerText, { color: theme.colors.onSurface }]}>{recordingTime}</Text>
-            <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant }]}>Recording...</Text>
-        </View>
-      )}
+  // Empty state for specific category
+  const CategoryEmptyComponent = () => {
+    let message = '';
+    let icon = 'text-box-outline';
+    
+    switch (activeTab) {
+      case 'appointments':
+        message = 'No appointments yet';
+        icon = 'calendar';
+        break;
+      case 'reminders':
+        message = 'No reminders yet';
+        icon = 'bell';
+        break;
+      case 'others':
+        message = 'No other recordings yet';
+        icon = 'text-box-outline';
+        break;
+      default:
+        message = 'No recordings yet';
+        icon = 'microphone-outline';
+    }
+    
+    return (
+      <View style={styles.emptyContainer}>
+        <MaterialCommunityIcons name={icon} size={48} color="#6B7280" />
+        <Text style={styles.emptyText}>{message}</Text>
+        <Text style={styles.emptySubText}>Tap the mic button to create one</Text>
+      </View>
+    );
+  };
 
-        <AudioWaveform isRecording={isRecording} audioLevel={audioLevel} />
-
-      {isRecording ? (
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity style={styles.controlButton} onPress={cancelRecording} disabled={isSaving}>
-              <MaterialCommunityIcons name="close" size={30} color={theme.colors.error} />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.controlButton, {backgroundColor: theme.colors.error}] } 
-              onPress={stopRecording}
-              disabled={isSaving}
-            >
-                {isSaving ? <ActivityIndicator color="#fff" /> : <MaterialCommunityIcons name="stop" size={40} color="#fff" />}
-            </TouchableOpacity>
-            </View>
-          ) : (
-                <TouchableOpacity 
-             style={[styles.recordButton, { backgroundColor: theme.colors.primary }]} 
-                  onPress={startRecording}
-             disabled={isLoadingList || isSaving || !session}
-                >
-            <MaterialCommunityIcons name="microphone" size={40} color="#fff" />
-                </TouchableOpacity>
+  // Combined empty state component
+  const ListEmptyComponent = () => {
+    return (
+      <View style={styles.emptyContainer}>
+        {isLoadingList ? (
+          <ActivityIndicator size="large" color="#4F46E5"/>
+        ) : listError ? (
+          <>
+            <Text style={styles.emptyText}>Error: {listError}</Text>
+            <Button mode="outlined" onPress={fetchRecordings} style={{ marginTop: 12 }}>Retry</Button>
+          </>
+        ) : !session ? (
+          <Text style={styles.emptyText}>Please log in to view recordings.</Text>
+        ) : searchQuery.trim() ? (
+          <>
+            <MaterialCommunityIcons name="magnify-close" size={48} color="#6B7280" />
+            <Text style={styles.emptyText}>No results found</Text>
+            <Text style={styles.emptySubText}>Try different search terms</Text>
+          </>
+        ) : (
+          <CategoryEmptyComponent />
         )}
-              </View>
+      </View>
+    );
+  };
 
-      {/* --- Add Confirmation Dialog --- */}
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar style={theme.dark ? "light" : "dark"} />
+      
+      <View style={styles.contentWrapper}>
+        {/* Header & Search */}
+        <View style={styles.headerContainer}>
+          <Text style={styles.headerTitle}>Recordings</Text>
+          
+          <View style={styles.searchContainer}>
+            <TextInput
+              placeholder="Search or add a title..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              mode="outlined"
+              style={styles.searchInput}
+              outlineStyle={{ borderRadius: 8 }}
+              disabled={isRecording}
+              right={
+                searchQuery ? 
+                <TextInput.Icon icon="close" onPress={() => setSearchQuery('')} /> : 
+                undefined
+              }
+            />
+            <IconButton
+              icon="tune"
+              size={24}
+              style={styles.filterButton}
+              onPress={() => {}}
+            />
+          </View>
+          
+          {/* Segment Control / Tabs */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScrollContainer}>
+            <View style={styles.tabContainer}>
+              <SegmentedButtons
+                value={activeTab}
+                onValueChange={setActiveTab}
+                buttons={[
+                  { value: 'all', label: `All (${counts.all})` },
+                  { value: 'appointments', label: `Appointments (${counts.appointments})` },
+                  { value: 'reminders', label: `Reminders (${counts.reminders})` },
+                  { value: 'others', label: `Others (${counts.others})` }
+                ]}
+                style={styles.segmentButtons}
+              />
+            </View>
+          </ScrollView>
+        </View>
+        
+        {/* Recordings List */}
+        <SectionList
+          sections={groupedRecordings}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <RecordingItem
+              recording={item}
+              currentlyPlayingId={currentlyPlayingId}
+              setCurrentlyPlayingId={setCurrentlyPlayingId}
+              showDeleteConfirmDialog={showDeleteConfirmDialog}
+              setSnackbarMessage={setSnackbarMessage}
+              setSnackbarVisible={setSnackbarVisible}
+            />
+          )}
+          renderSectionHeader={({ section: { title } }) => (
+            <SectionHeader title={title} />
+          )}
+          contentContainerStyle={styles.listContentContainer}
+          ListEmptyComponent={ListEmptyComponent}
+          refreshing={isLoadingList && recordings.length > 0}
+          onRefresh={isDeleting ? undefined : fetchRecordings}
+          stickySectionHeadersEnabled={true}
+        />
+        
+        {/* Recording UI */}
+        {isRecording && (
+          <Surface style={styles.recordingOverlay} elevation={4}>
+            <View style={styles.timerStatusContainer}>
+              <Text style={styles.timerText}>{recordingTime}</Text>
+              <Text style={styles.statusText}>Recording...</Text>
+              <AudioWaveform isRecording={isRecording} audioLevel={audioLevel} />
+            </View>
+            <View style={styles.recordingButtonContainer}>
+              <TouchableOpacity 
+                style={[styles.cancelButton, { borderColor: theme.colors.error }]} 
+                onPress={cancelRecording} 
+                disabled={isSaving}
+              >
+                <MaterialCommunityIcons name="close" size={24} color={theme.colors.error} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.stopButton, { backgroundColor: theme.colors.error }]}
+                onPress={stopRecording}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <MaterialCommunityIcons name="stop" size={32} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </Surface>
+        )}
+        
+        {/* Floating Action Button */}
+        {!isRecording && (
+          <View style={styles.fabContainer}>
+            <TouchableOpacity
+              style={styles.fabButton}
+              onPress={startRecording}
+              disabled={isLoadingList || isSaving || !session}
+            >
+              <MaterialCommunityIcons name="microphone" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+      
+      {/* Delete Confirmation Dialog */}
       <Portal>
         <Dialog visible={confirmDialogVisible} onDismiss={hideConfirmDialog}>
-          <Dialog.Icon icon="alert-circle-outline" color={theme.colors.error} size={36} />
+          <Dialog.Icon icon="alert-circle-outline" color="#EF4444" size={36} />
           <Dialog.Title style={styles.dialogTitle}>Confirm Deletion</Dialog.Title>
           <Dialog.Content>
-            <Text variant="bodyMedium">
+            <Text style={styles.dialogText}>
               Are you sure you want to delete "{recordingToDelete?.title || 'this recording'}"?
               This action cannot be undone.
             </Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={hideConfirmDialog} disabled={isDeleting}>Cancel</Button>
-            <Button onPress={executeDelete} textColor={theme.colors.error} disabled={isDeleting} loading={isDeleting}>
-                Delete
+            <Button 
+              onPress={executeDelete} 
+              textColor="#EF4444" 
+              disabled={isDeleting} 
+              loading={isDeleting}
+            >
+              Delete
             </Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
-      {/* --- End Confirmation Dialog --- */}
       
+      {/* Snackbar */}
       <Snackbar
-          visible={snackbarVisible}
-          onDismiss={() => setSnackbarVisible(false)}
-          duration={3000} // 3 seconds
-          style={{ bottom: 80 }} // Adjust position if needed
+        visible={snackbarVisible}
+        onDismiss={() => setSnackbarVisible(false)}
+        duration={3000}
+        style={styles.snackbar}
       >
-          {snackbarMessage}
+        {snackbarMessage}
       </Snackbar>
     </SafeAreaView>
   );
@@ -888,52 +1217,135 @@ function RecordScreenContent() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F9FAFB',
   },
-  header: {
-    padding: 16,
-  },
-  searchBar: {
-    elevation: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    height: 48,
-  },
-  searchInput: {
-    fontSize: 16,
-  },
-  filterContainer: {
+  contentWrapper: {
+    flex: 1,
+    maxWidth: 768,
+    marginHorizontal: 'auto',
+    width: '100%',
     paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  headerContainer: {
     marginBottom: 16,
   },
-  filterButtons: {
-    backgroundColor: 'transparent',
+  headerTitle: {
+    fontSize: 24,
+    lineHeight: 32,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    backgroundColor: '#FFFFFF',
+    fontSize: 14,
+    color: '#374151',
   },
   filterButton: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    marginLeft: 8,
   },
-  recordingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#7C3AED',
-    margin: 16,
-    borderRadius: 24,
+  tabScrollContainer: {
+    marginBottom: 8,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+  },
+  segmentButtons: {
+    height: 36,
+    minWidth: 500, // Force horizontal scrolling on narrow screens
+  },
+  sectionHeader: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#F9FAFB',
+    marginTop: 24,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  cardContainer: {
+    borderRadius: 8,
+    marginBottom: 12, // Increased from 8px
     overflow: 'hidden',
   },
-  timerText: {
-    fontSize: 48,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    color: '#FFFFFF',
-    fontWeight: '600',
-    marginBottom: 32,
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16, // Increased from 12px
   },
-  recordButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#E11D48',
+  iconContainer: {
+    width: 40, // Increased from 36px
+    height: 40, // Increased from 36px
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  categoryIcon: {
+    position: 'absolute',
+    opacity: 0.7,
+  },
+  playIcon: {
+    position: 'absolute',
+  },
+  textContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  titleText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  metaText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusChip: {
+    height: 20,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    maxWidth: 100, // Prevent overflow
+  },
+  menuButton: {
+    margin: 0,
+    padding: 8,
+    borderRadius: 20,
+    // Increased touch target
+    width: 40,
+    height: 40,
+  },
+  fabContainer: {
+    position: 'absolute',
+    bottom: 24,
+    width: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  fabButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#4F46E5',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -942,178 +1354,102 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  recordButtonInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  transcriptionContainer: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    margin: 16,
-    marginTop: 0,
-  },
-  transcriptionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  transcriptionText: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#4B5563',
-  },
-  summaryContainer: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    margin: 16,
-    marginTop: 0,
-  },
-  flex: {
-    flex: 1,
-  },
   listContentContainer: {
-    paddingBottom: 180, // Ensure space for controls
+    paddingBottom: 80,
+    minHeight: '100%',
   },
-  itemOuterContainer: { // New outer container for touchable opacity
-    marginBottom: 8,
-    borderRadius: 8,
-    // Add other styling like background if needed for highlighting
-    overflow: 'hidden', // Clip modal if absolutely positioned somehow
-  },
-  itemContainer: { // Assuming this style exists
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 8,
-    // backgroundColor will be set dynamically
-  },
-  itemContentContainer: { // Added this (or similar name might exist)
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  itemTextContainer: { // Assuming this style exists
-    flex: 1,
-    justifyContent: 'center',
-  },
-  itemTitle: { // Assuming this style exists
-    marginBottom: 2,
-  },
-  itemDetail: { // Assuming this style exists
-    opacity: 0.7,
-  },
-  playButton: { // Assuming this style exists
-    marginRight: 12,
-    padding: 4, // Add padding for easier touch
-  },
-  menuButton: { // Assuming this style exists
-    padding: 8, // Increase touchable area
-    marginLeft: 8,
-  },
-  modalContainer: { // Assuming this style exists for the modal
-     padding: 20,
-     margin: 20,
-     borderRadius: 8,
-  },
-  modalTitle: { // Assuming this style exists
-     marginBottom: 16,
-     textAlign: 'center',
-  },
-  input: { // Assuming this style exists for modal input
-     marginBottom: 16,
-  },
-  modalActions: { // Assuming this style exists
-     flexDirection: 'row',
-     justifyContent: 'flex-end',
-     gap: 8, // Add gap between buttons
-  },
-  // Controls Styles
-  controlsContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)', // Slightly transparent white
-    paddingBottom: Platform.OS === 'ios' ? 25 : 15, // More padding for iOS bottom bar
-    paddingTop: 10,
-    paddingHorizontal: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    alignItems: 'center',
-  },
-  waveform: {
-    height: 50,
-    width: '100%',
-    marginBottom: 10,
-  },
-  timerStatusContainer: {
-      alignItems: 'center',
-      marginBottom: 10,
-  },
-  statusText: {
-    fontSize: 14,
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    width: '100%',
-  },
-  controlButton: {
-    padding: 10,
-  },
-  // Empty List Styles
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 50, // Add margin bottom
+    paddingVertical: 32,
   },
   emptyText: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginTop: 16,
   },
   emptySubText: {
-    marginTop: 5,
     fontSize: 14,
-    color: '#666',
+    color: '#6B7280',
     textAlign: 'center',
+    marginTop: 8,
     paddingHorizontal: 40,
   },
-  titleInputContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8, // Add some top padding
-    paddingBottom: 8, // Add some bottom padding
+  recordingOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
   },
-  titleInput: {
-    // Add styling if needed
+  timerStatusContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  itemLoadingIndicator: {
-    marginLeft: 12, 
-    // Add other styling as needed
+  timerText: {
+    fontSize: 48,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#111827',
+    fontWeight: '600',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  recordingButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 24,
+  },
+  cancelButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    padding: 20,
+    margin: 20,
+    borderRadius: 8,
+  },
+  modalTitle: {
+    marginBottom: 16,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  input: {
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   dialogTitle: {
     textAlign: 'center',
   },
-  loadingOverlay: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: 'rgba(0,0,0,0.1)', // Slight overlay
-      zIndex: 10, // Ensure it's above the list
+  dialogText: {
+    color: '#4B5563',
+    lineHeight: 20,
+  },
+  snackbar: {
+    bottom: 16,
   },
 }); 
