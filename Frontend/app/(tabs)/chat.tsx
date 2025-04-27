@@ -7,16 +7,16 @@ import {
   TouchableOpacity,
   Platform,
   Keyboard,
-  ListRenderItem,
   KeyboardAvoidingView,
   InputAccessoryView,
   Animated,
   EmitterSubscription,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Text, useTheme, Portal, Snackbar, Button } from 'react-native-paper';
+import { Text, useTheme, Snackbar, Surface, Avatar } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -33,12 +33,47 @@ interface ChatMessage {
 const INPUT_HEIGHT = 56;
 const INPUT_CONTAINER_HEIGHT = Platform.OS === 'ios' ? 80 : 64;
 
+// Typing Indicator component
+const TypingIndicator = () => {
+  const theme = useTheme();
+  const [dots, setDots] = useState(1);
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(prev => prev < 3 ? prev + 1 : 1);
+    }, 500);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  return (
+    <View style={[styles.typingContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
+      <Text style={{ color: theme.colors.onSurfaceVariant }}>
+        {dots === 1 ? '.' : dots === 2 ? '..' : '...'}
+      </Text>
+    </View>
+  );
+};
+
+// Message Timestamp component
+const MessageTime = ({ timestamp }: { timestamp: number }) => {
+  const theme = useTheme();
+  const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  return (
+    <Text style={[styles.timeText, { color: theme.colors.onSurfaceVariant }]}>
+      {time}
+    </Text>
+  );
+};
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isTyping, setIsTyping] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
@@ -52,28 +87,17 @@ export default function ChatScreen() {
       backgroundColor: theme.colors.background,
     },
     header: {
-      backgroundColor: theme.colors.background,
+      backgroundColor: theme.colors.surface,
+      borderBottomColor: theme.colors.surfaceVariant,
     },
     content: {
       backgroundColor: theme.colors.background,
-    },
-    aiAvatar: {
-      backgroundColor: theme.colors.primary,
-    },
-    aiAvatarText: {
-      color: theme.colors.onPrimary,
-    },
-    messageContent: {
-      backgroundColor: theme.colors.surfaceVariant,
     },
     userMessageContent: {
       backgroundColor: theme.colors.primary,
     },
     aiMessageContent: {
       backgroundColor: theme.colors.surfaceVariant,
-    },
-    messageText: {
-      color: theme.colors.onSurfaceVariant,
     },
     userMessageText: {
       color: theme.colors.onPrimary,
@@ -88,13 +112,12 @@ export default function ChatScreen() {
       color: theme.colors.error,
     },
     bottomContainer: {
-      backgroundColor: theme.colors.background,
-      borderTopColor: theme.colors.outlineVariant,
+      backgroundColor: theme.colors.surface,
+      borderTopColor: theme.colors.surfaceVariant,
     },
     input: {
       color: theme.colors.onSurface,
       backgroundColor: theme.colors.surfaceVariant,
-      borderRadius: 20,
     },
     inputAccessory: {
       backgroundColor: theme.colors.surfaceVariant,
@@ -182,19 +205,45 @@ export default function ChatScreen() {
   }, []);
 
   const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
+    
+    // Clear input and scroll to bottom
+    setInput('');
+    flatListRef.current?.scrollToEnd({ animated: true });
+    
     const tempId = Date.now().toString();
     const newMessage: ChatMessage = {
       id: tempId,
       text,
       isUser: true,
-      status: 'sending',
+      status: 'sent', // Optimistic update
       timestamp: Date.now(),
     };
 
     setMessages(prev => [...prev, newMessage]);
+    
+    // Show typing indicator
+    setIsTyping(true);
+    
+    // Simulate AI response delay (2-3 seconds)
+    setTimeout(() => {
+      const aiResponse: ChatMessage = {
+        id: Date.now().toString(),
+        text: "I understand your query. Let me help you with that. This is a simulated response from the AI assistant.",
+        isUser: false,
+        status: 'sent',
+        timestamp: Date.now(),
+      };
+      
+      setIsTyping(false);
+      setMessages(prev => [...prev, aiResponse]);
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 2000 + Math.random() * 1000);
 
+    // This would be the actual API implementation
+    /*
     try {
-      // Send message implementation
+      setIsTyping(true);
       const response = await fetch('/api/messages', {
         method: 'POST',
         body: JSON.stringify({ text }),
@@ -210,6 +259,16 @@ export default function ChatScreen() {
             : msg
         )
       );
+      
+      // Add AI response
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        text: data.response,
+        isUser: false,
+        status: 'sent',
+        timestamp: Date.now(),
+      }]);
+      
     } catch (err) {
       setMessages(prev => 
         prev.map(msg => 
@@ -219,7 +278,10 @@ export default function ChatScreen() {
         )
       );
       setError('Failed to send message. Tap to retry.');
+    } finally {
+      setIsTyping(false);
     }
+    */
   };
 
   const handleRetry = async (messageId: string) => {
@@ -235,28 +297,62 @@ export default function ChatScreen() {
     }
   };
 
-  const renderMessage = ({ item: message }: { item: ChatMessage }) => (
-    <View style={[styles.messageContainer, message.isUser ? styles.userMessageContainer : styles.aiMessageContainer]}>
-      <TouchableOpacity
-        onPress={() => message.status === 'error' && handleRetry(message.id)}
-        disabled={message.status !== 'error'}
-        style={styles.messageBubble}
-      >
-        <Text style={[
-          styles.messageText,
-          message.status === 'error' && styles.errorText
-        ]}>
-          {message.text}
-        </Text>
-        {message.status === 'error' && (
-          <Text style={styles.retryText}>Tap to retry</Text>
+  // Render individual message
+  const renderMessage = ({ item: message }: { item: ChatMessage }) => {
+    const isUser = message.isUser;
+    
+    return (
+      <View style={[
+        styles.messageRow, 
+        isUser ? styles.userMessageRow : styles.aiMessageRow
+      ]}>
+        {/* AI Avatar (only for AI messages) */}
+        {!isUser && (
+          <Avatar.Icon 
+            size={36} 
+            icon="robot" 
+            color={theme.colors.onPrimary} 
+            style={{ backgroundColor: theme.colors.primary, marginRight: 8 }} 
+          />
         )}
-        {(message.status === 'sending' || retryingMessageId === message.id) && (
-          <ActivityIndicator size="small" style={styles.sendingIndicator} />
-        )}
-      </TouchableOpacity>
-    </View>
-  );
+        
+        <View style={styles.messageContainer}>
+          {/* Message bubble */}
+          <Surface 
+            style={[
+              styles.messageBubble,
+              isUser ? [styles.userMessageBubble, themedStyles.userMessageContent] : [styles.aiMessageBubble, themedStyles.aiMessageContent],
+              message.status === 'error' && [styles.errorMessage, { borderColor: theme.colors.error }]
+            ]}
+            elevation={1}
+          >
+            <Text 
+              style={[
+                styles.messageText,
+                isUser ? themedStyles.userMessageText : themedStyles.aiMessageText
+              ]}
+            >
+              {message.text}
+            </Text>
+            
+            {/* Error and sending indicators */}
+            {message.status === 'error' && (
+              <Text style={[styles.retryText, { color: theme.colors.error }]}>
+                Tap to retry
+              </Text>
+            )}
+            
+            {(message.status === 'sending' || retryingMessageId === message.id) && (
+              <ActivityIndicator size="small" style={styles.sendingIndicator} color={isUser ? theme.colors.onPrimary : theme.colors.primary} />
+            )}
+            
+            {/* Timestamp */}
+            <MessageTime timestamp={message.timestamp} />
+          </Surface>
+        </View>
+      </View>
+    );
+  };
 
   const handleInputSizeChange = useCallback((event: { nativeEvent: { contentSize: { height: number } } }) => {
     const { height } = event.nativeEvent.contentSize;
@@ -275,9 +371,9 @@ export default function ChatScreen() {
 
     return (
       <InputAccessoryView nativeID={inputAccessoryViewID}>
-        <View style={styles.inputAccessory}>
+        <View style={[styles.inputAccessory, themedStyles.inputAccessory]}>
           <TouchableOpacity onPress={() => Keyboard.dismiss()}>
-            <Text style={styles.doneButton}>Done</Text>
+            <Text style={themedStyles.doneButton}>Done</Text>
           </TouchableOpacity>
         </View>
       </InputAccessoryView>
@@ -291,43 +387,50 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <StatusBar style="dark" />
-        <View style={[styles.header, themedStyles.header]}>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="Menu"
-            accessibilityHint="Opens the navigation menu"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="menu" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-          <Text 
-            style={[styles.headerTitle, { color: theme.colors.onSurface }]}
-            accessibilityRole="header"
-          >
-            MystBuddy
-          </Text>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="Edit preferences"
-            accessibilityHint="Opens chat preferences"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="square-edit-outline" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="More options"
-            accessibilityHint="Shows additional chat options"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-        </View>
+        <StatusBar style={theme.dark ? "light" : "dark"} />
         
+        {/* Header */}
+        <Surface style={[styles.header, themedStyles.header]} elevation={2}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.headerButton}
+              accessible={true}
+              accessibilityLabel="Menu"
+              accessibilityHint="Opens the navigation menu"
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons name="menu" size={24} color={theme.colors.onSurface} />
+            </TouchableOpacity>
+            
+            <View style={styles.headerTitleContainer}>
+              <Avatar.Icon 
+                size={32} 
+                icon="robot" 
+                color={theme.colors.onPrimary}
+                style={{ backgroundColor: theme.colors.primary, marginRight: 8 }} 
+              />
+              <Text 
+                style={[styles.headerTitle, { color: theme.colors.onSurface }]}
+                accessibilityRole="header"
+              >
+                MystBuddy
+              </Text>
+              <View style={[styles.statusIndicator, { backgroundColor: theme.colors.primary }]} />
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.headerButton}
+              accessible={true}
+              accessibilityLabel="More options"
+              accessibilityHint="Shows additional chat options"
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.colors.onSurface} />
+            </TouchableOpacity>
+          </View>
+        </Surface>
+        
+        {/* Error Snackbar */}
         {error && (
           <Snackbar
             visible={!!error}
@@ -341,7 +444,9 @@ export default function ChatScreen() {
           </Snackbar>
         )}
         
+        {/* Messages List */}
         <FlatList
+          ref={flatListRef}
           data={messages}
           renderItem={renderMessage}
           keyExtractor={item => item.id}
@@ -353,39 +458,57 @@ export default function ChatScreen() {
                 <MessageSkeleton isUser />
                 <MessageSkeleton />
               </>
-            ) : null
+            ) : (
+              <View style={styles.emptyContainer}>
+                <MaterialCommunityIcons 
+                  name="chat-question-outline" 
+                  size={48} 
+                  color={theme.colors.primary} 
+                  style={{ marginBottom: 16 }}
+                />
+                <Text style={[styles.emptyText, themedStyles.emptyText]}>
+                  Ask MystBuddy anything about your health
+                </Text>
+              </View>
+            )
           )}
           refreshControl={
             <RefreshControl
               refreshing={isLoading}
               onRefresh={loadMessages}
+              colors={[theme.colors.primary]}
             />
           }
+          onContentSizeChange={() => {
+            if (messages.length > 0) {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }
+          }}
         />
         
-        <Animated.View style={[
-          styles.bottomContainer,
-          themedStyles.bottomContainer,
-          { height: inputHeightRef.current }
-        ]}>
+        {/* Typing Indicator */}
+        {isTyping && (
+          <View style={styles.typingIndicatorContainer}>
+            <Avatar.Icon 
+              size={32} 
+              icon="robot" 
+              color={theme.colors.onPrimary}
+              style={{ backgroundColor: theme.colors.primary, marginRight: 8 }} 
+            />
+            <TypingIndicator />
+          </View>
+        )}
+        
+        {/* Input Area */}
+        <Surface style={[styles.bottomContainer, themedStyles.bottomContainer]} elevation={4}>
           <View style={styles.inputContainer}>
             <View style={styles.inputRow}>
-              <TouchableOpacity 
-                style={styles.actionButton} 
-                onPress={() => inputRef.current?.focus()}
-                accessible={true}
-                accessibilityLabel="Search messages"
-                accessibilityHint="Search through chat history"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="magnify" size={24} color={theme.colors.onSurfaceVariant} />
-              </TouchableOpacity>
               <TextInput
                 ref={inputRef}
                 style={[styles.input, themedStyles.input]}
                 value={input}
                 onChangeText={setInput}
-                placeholder="Ask anything"
+                placeholder="Ask MystBuddy..."
                 placeholderTextColor={theme.colors.onSurfaceVariant}
                 multiline
                 maxLength={1000}
@@ -400,38 +523,47 @@ export default function ChatScreen() {
                 accessibilityHint="Type your message here"
                 accessibilityRole="textbox"
               />
-              <TouchableOpacity 
-                style={styles.actionButton}
-                accessible={true}
-                accessibilityLabel="Start voice input"
-                accessibilityHint="Record your message using voice"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="microphone" size={24} color={theme.colors.onSurfaceVariant} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[
-                  styles.sendButton,
-                  !input.trim() && styles.sendButtonDisabled,
-                  { backgroundColor: input.trim() ? theme.colors.primary : theme.colors.surfaceVariant }
-                ]}
-                onPress={() => handleSendMessage(input)}
-                disabled={!input.trim() || isLoading}
-                accessible={true}
-                accessibilityLabel="Send message"
-                accessibilityHint={!input.trim() ? "Type a message first" : "Send your message"}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !input.trim() || isLoading }}
-              >
-                <MaterialCommunityIcons 
-                  name="send" 
-                  size={24} 
-                  color={input.trim() ? theme.colors.onPrimary : theme.colors.onSurfaceVariant} 
-                />
-              </TouchableOpacity>
+              
+              <View style={styles.buttonGroup}>
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  accessible={true}
+                  accessibilityLabel="Start voice input"
+                  accessibilityHint="Record your message using voice"
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons 
+                    name="microphone" 
+                    size={24} 
+                    color={theme.colors.onSurfaceVariant} 
+                  />
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[
+                    styles.sendButton,
+                    !input.trim() && styles.sendButtonDisabled,
+                    { backgroundColor: input.trim() ? theme.colors.primary : theme.colors.surfaceVariant }
+                  ]}
+                  onPress={() => handleSendMessage(input)}
+                  disabled={!input.trim() || isLoading}
+                  accessible={true}
+                  accessibilityLabel="Send message"
+                  accessibilityHint={!input.trim() ? "Type a message first" : "Send your message"}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !input.trim() || isLoading }}
+                >
+                  <MaterialCommunityIcons 
+                    name="send" 
+                    size={20} 
+                    color={input.trim() ? theme.colors.onPrimary : theme.colors.onSurfaceVariant} 
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </Animated.View>
+        </Surface>
+        
         {renderInputAccessory()}
       </KeyboardAvoidingView>
     </ErrorBoundary>
@@ -443,126 +575,143 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    height: 60,
+    width: '100%',
+    borderBottomWidth: 1,
+  },
+  headerContent: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    height: 56,
-    elevation: 0,
-    shadowOpacity: 0,
   },
   headerButton: {
     padding: 8,
   },
+  headerTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: {
-    flex: 1,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
-    marginLeft: 16,
   },
-  content: {
-    flex: 1,
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: 8,
   },
-  messageList: {
-    flex: 1,
-  },
-  messageListContent: {
+  messagesContainer: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 80,
   },
-  messageBubble: {
+  messageRow: {
     flexDirection: 'row',
     marginBottom: 16,
-    alignItems: 'flex-end',
     width: '100%',
   },
-  userBubble: {
+  userMessageRow: {
     justifyContent: 'flex-end',
-    flexDirection: 'row-reverse',
   },
-  aiBubble: {
+  aiMessageRow: {
     justifyContent: 'flex-start',
   },
-  avatarContainer: {
-    marginRight: 8,
+  messageContainer: {
+    maxWidth: '80%',
   },
-  aiAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  aiAvatarText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  messageContent: {
-    maxWidth: '70%',
+  messageBubble: {
     borderRadius: 20,
     padding: 12,
+    minWidth: 80,
   },
-  userMessageContent: {
-    alignSelf: 'flex-end',
-    marginRight: 0,
+  userMessageBubble: {
+    borderBottomRightRadius: 4,
   },
-  aiMessageContent: {
-    alignSelf: 'flex-start',
-    marginLeft: 0,
+  aiMessageBubble: {
+    borderBottomLeftRadius: 4,
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  messageStatus: {
+  timeText: {
+    fontSize: 10,
+    alignSelf: 'flex-end',
     marginTop: 4,
+    opacity: 0.7,
   },
   errorMessage: {
     borderWidth: 1,
   },
-  retryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
   retryText: {
     fontSize: 12,
-    marginLeft: 4,
+    marginTop: 4,
+  },
+  sendingIndicator: {
+    alignSelf: 'flex-end',
+    marginTop: 4,
   },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 32,
+    paddingHorizontal: 24,
   },
   emptyText: {
     fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  typingIndicatorContainer: {
+    position: 'absolute',
+    bottom: 80,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  typingContainer: {
+    padding: 10,
+    borderRadius: 16,
+    minWidth: 40,
+    alignItems: 'center',
   },
   bottomContainer: {
-    width: '100%',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     borderTopWidth: 1,
+    paddingBottom: Platform.OS === 'ios' ? 16 : 8,
   },
   inputContainer: {
-    flex: 1,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingTop: 12,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-  },
-  actionButton: {
-    padding: 8,
-    marginBottom: 4,
   },
   input: {
     flex: 1,
     fontSize: 16,
     lineHeight: 20,
     maxHeight: INPUT_HEIGHT * 3,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginHorizontal: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  actionButton: {
+    padding: 8,
+    marginBottom: 4,
   },
   sendButton: {
     width: 40,
@@ -570,7 +719,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
   },
   sendButtonDisabled: {
     opacity: 0.7,
@@ -585,28 +733,5 @@ const styles = StyleSheet.create({
   },
   doneButton: {
     fontSize: 17,
-  },
-  errorText: {
-    color: 'red',
-  },
-  sendingIndicator: {
-    marginLeft: 8,
-  },
-  messageContainer: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    alignItems: 'flex-end',
-    width: '100%',
-  },
-  userMessageContainer: {
-    justifyContent: 'flex-end',
-    flexDirection: 'row-reverse',
-  },
-  aiMessageContainer: {
-    justifyContent: 'flex-start',
-  },
-  messagesContainer: {
-    padding: 16,
-    paddingBottom: 32,
   },
 }); 
