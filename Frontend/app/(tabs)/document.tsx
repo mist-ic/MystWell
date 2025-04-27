@@ -11,6 +11,8 @@ import { TextInput } from 'react-native';
 // @ts-ignore - Suppress incorrect type definition error for default import
 import scanDocument from 'react-native-document-scanner-plugin';
 import { useAuth } from '@/context/auth';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 
 // Define API Base URL (TODO: Move to central config/env)
 const API_BASE_URL = 'https://mystwell.me';
@@ -40,7 +42,10 @@ export interface DocumentInfo {
 
 export default function DocumentScreen() {
   const theme = useTheme();
-  const { session, currentProfileId } = useAuth();
+  // Extract currentProfileId from the session and user data
+  const { session, user } = useAuth();
+  const currentProfileId = user?.id || '';
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -298,6 +303,7 @@ export default function DocumentScreen() {
      try {
         // Note: The type definition for scanDocument might be inaccurate in the plugin's types
         // We might need to cast the result or use // @ts-ignore if linter complains here
+        // @ts-ignore - Type definition issue with react-native-document-scanner-plugin
         const result: { scannedImages?: string[] } = await scanDocument({
             croppedImageQuality: 100, 
             responseType: 'imageFilePath', 
@@ -384,11 +390,106 @@ export default function DocumentScreen() {
   };
 
   // --- Placeholder for Upload Document --- 
-  const handleUploadDocument = () => {
-    console.log("Upload Document action triggered - TBD");
-    // TODO: Implement file picking and upload logic
-    Alert.alert("Coming Soon", "Document upload functionality is not yet implemented.");
-    setAddDocumentModalVisible(false); // Add closing the modal
+  const handleUploadDocument = async () => {
+    if (isUploading || isScanning) return;
+
+    let documentId: string | null = null;
+    let storagePath: string | null = null;
+
+    try {
+      setIsUploading(true);
+      
+      // Use DocumentPicker to select a file
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      
+      if (result.canceled) {
+        console.log('Document picking cancelled');
+        return;
+      }
+      
+      const fileUri = result.assets[0].uri;
+      const fileName = result.assets[0].name || 'Document';
+      
+      console.log('Selected document:', fileUri);
+      
+      if (!session || !currentProfileId) {
+        throw new Error("User not authenticated");
+      }
+
+      console.log("Requesting upload URL...");
+      const uploadReqResponse = await fetch(`${API_BASE_URL}/documents/upload-request`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      
+      if (!uploadReqResponse.ok) { 
+        throw new Error('Failed to get upload details'); 
+      }
+      
+      const uploadData = await uploadReqResponse.json();
+      documentId = uploadData.documentId;
+      storagePath = uploadData.storagePath;
+      const { uploadUrl } = uploadData;
+      
+      console.log(`Received upload URL for document ${documentId}`);
+
+      if (!documentId || !storagePath) { 
+        throw new Error('Invalid upload details received.'); 
+      }
+
+      // Create an optimistic document entry
+      const optimisticDoc: DocumentInfo = {
+        id: documentId,
+        profile_id: currentProfileId,
+        storage_path: storagePath,
+        display_name: fileName,
+        status: 'pending_upload',
+        detected_document_type: null,
+        structured_data: null,
+        error_message: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      
+      setDocuments(prev => [optimisticDoc, ...prev]);
+
+      // Upload the file
+      await uploadFile(fileUri, uploadUrl);
+
+      console.log(`Notifying backend of upload completion for ${documentId}`);
+      const completeResponse = await fetch(`${API_BASE_URL}/documents/upload-complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ documentId, storagePath }),
+      });
+      
+      if (!completeResponse.ok) { 
+        throw new Error('Failed to notify backend of upload completion'); 
+      }
+
+      // Update document status
+      setDocuments(prev => 
+        prev.map(doc => doc.id === documentId ? { ...doc, status: 'uploaded' } : doc)
+      );
+      
+      Alert.alert("Success", "Document uploaded and queued for processing.");
+    } catch (error: any) {
+      console.error("Upload process failed:", error);
+      Alert.alert("Upload Failed", error?.message || "Could not upload the document.");
+      
+      if (documentId) {
+        setDocuments(prev => prev.filter(doc => doc.id !== documentId));
+      }
+    } finally {
+      setIsUploading(false);
+      setAddDocumentModalVisible(false);
+    }
   };
 
   // --- Filtering logic (Update to use display_name) ---
