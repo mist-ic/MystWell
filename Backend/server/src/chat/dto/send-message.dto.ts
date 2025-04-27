@@ -1,17 +1,13 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsArray, IsNotEmpty, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
-import { ChatMessageDto } from './chat-message.dto';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 export class SendMessageDto {
-  @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  message: string;
+  @MaxLength(4000) // Limit message length
+  readonly message: string;
 
-  @ApiProperty({ type: [ChatMessageDto] })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => ChatMessageDto)
-  history: ChatMessageDto[];
+  // Add conversationId later if implementing persistent chat history
+  // @IsOptional()
+  // @IsUUID()
+  // readonly conversationId?: string;
 } 

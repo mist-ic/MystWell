@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, InternalServerErrorException, ForbiddenException, UnauthorizedException, Logger } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants';
+import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
 import { v4 as uuidv4 } from 'uuid';
 import { ProfileService } from '../profile/profile.service';
 import { Profile } from '../profile/profile.service';

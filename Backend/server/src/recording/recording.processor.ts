@@ -5,7 +5,7 @@ import { RECORDING_PROCESSING_QUEUE } from './constants';
 import { SpeechToTextService } from './speech-to-text.service';
 import { GeminiAnalysisService, StructuredRecordingDetails } from './gemini-analysis.service';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants';
+import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
 import { RecordingService } from './recording.service';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';

@@ -7,7 +7,7 @@ import { Queue } from 'bullmq';
 import { DOCUMENT_PROCESSING_QUEUE } from './document.constants'; // Import from constants file
 import { RenameDocumentDto } from './dto/rename-document.dto';
 import { ProfileService } from '../profile/profile.service';
-import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants'; // Updated import path
+import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module'; // Import service role client
 
 // Define an interface for the expected document structure (optional but good practice)
 export interface Document {

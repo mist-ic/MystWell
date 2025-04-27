@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { DOCUMENT_PROCESSING_QUEUE } from './document.constants';
 import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
-import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants'; // Update import path
+import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module'; // Correct path
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Schema, SchemaType } from '@google/generative-ai';

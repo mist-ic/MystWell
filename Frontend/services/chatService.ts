@@ -1,67 +1,80 @@
-import { Platform } from 'react-native';
-import { supabase } from '../lib/supabase'; // Assuming supabase client is exported from here
-import { getBaseUrl } from './utils'; // Helper to get API base URL
+import { Session } from '@supabase/supabase-js';
 
-// Type for messages sent/received from the backend API
-// Matches the Content type from @google/generative-ai SDK used in backend
-interface ApiChatMessage {
-  role: 'user' | 'model';
-  parts: { text: string }[];
+// Define the structure of the API response
+interface ChatResponse {
+  reply: string;
 }
 
-const API_URL = getBaseUrl();
+// Define the structure of the API error response (adjust as needed based on backend)
+interface ApiError {
+  statusCode: number;
+  message: string | string[];
+  error?: string;
+}
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL; // Ensure this is set in your .env
+
+if (!API_BASE_URL) {
+  console.error("Error: EXPO_PUBLIC_API_URL is not defined. Please set it in your .env file.");
+  // Optionally throw an error or provide a default for local dev, but erroring is safer
+  // throw new Error("EXPO_PUBLIC_API_URL is not defined.");
+}
 
 /**
- * Sends a message and history to the backend chat endpoint.
+ * Sends a message to the backend chat API.
+ * 
  * @param message The user's message text.
- * @param history The conversation history.
- * @returns The AI model's response text.
+ * @param session The current Supabase session containing the auth token.
+ * @returns A promise that resolves with the AI's reply string.
+ * @throws An error if the API call fails or returns an error status.
  */
-export const sendMessageToMist = async (
-  message: string,
-  history: ApiChatMessage[],
-): Promise<string> => {
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-
-  if (sessionError || !sessionData.session) {
-    console.error('Error getting session or no active session:', sessionError);
-    throw new Error('User not authenticated');
+export const sendMessage = async (message: string, session: Session | null): Promise<string> => {
+  if (!session) {
+    throw new Error('Authentication required. No active session found.');
   }
 
-  const token = sessionData.session.access_token;
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  const url = `${API_BASE_URL}/chat/send`;
+  const token = session.access_token;
 
   try {
-    const response = await fetch(`${API_URL}/chat/send`, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        // Add platform header if used by backend
-        'X-Platform': Platform.OS,
+        'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ message, history }),
+      body: JSON.stringify({ message }),
     });
 
-    const responseData = await response.json();
+    const responseBody = await response.json();
 
     if (!response.ok) {
-      console.error('Backend error:', response.status, responseData);
-      throw new Error(responseData.message || 'Failed to send message to backend');
+      // Attempt to parse error details from the backend response
+      const errorData = responseBody as ApiError;
+      const errorMessage = errorData.message 
+        ? (Array.isArray(errorData.message) ? errorData.message.join(', ') : errorData.message)
+        : `API Error: ${response.status} ${response.statusText}`;
+      console.error('Chat API Error:', errorMessage, 'Status:', response.status, 'Response Body:', responseBody);
+      throw new Error(errorMessage);
     }
 
-    if (!responseData.response) {
-        console.error("Backend response missing 'response' field:", responseData);
-        throw new Error('Invalid response format from backend');
+    // Assuming the backend returns { reply: "..." }
+    const chatResponse = responseBody as ChatResponse;
+    if (typeof chatResponse.reply !== 'string') {
+        console.error('Invalid chat response format:', chatResponse);
+        throw new Error('Received invalid response format from chat API.');
     }
 
-    return responseData.response;
+    return chatResponse.reply;
+
   } catch (error) {
-    console.error('Error sending message to Mist:', error);
-    // Re-throw the error to be handled by the calling component
-    if (error instanceof Error) {
-        throw error;
-    } else {
-        throw new Error('An unknown error occurred during the API call.');
-    }
+    console.error('Error sending chat message:', error);
+    // Re-throw the error to be caught by the calling component
+    // The component can then decide how to display the error (e.g., Snackbar)
+    throw error; 
   }
 }; 
