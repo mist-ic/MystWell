@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { StatusItem } from '@/components/ui/StatusItem';
 import { ReminderItem, ReminderType } from '@/components/ui/ReminderItem';
 import { QuickActionCard } from '@/components/ui/Card/QuickActionCard';
@@ -170,15 +171,15 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      {/* Add StatusBar with dark content (black text) */}
+      <StatusBar style="dark" />
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Top Bar */}
         <View style={styles.topBar}>
           {/* Header */}
           <View style={styles.header}>
-            <Text variant="headlineLarge" style={styles.title}>MystWell</Text>
-            <Text variant="bodyLarge" style={styles.subtitle}>
-              Your health assistant
-            </Text>
+            <Text variant="headlineSmall" style={styles.title}>MystWell</Text>
           </View>
 
           {/* User Profile */}
@@ -401,18 +402,15 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 24,
   },
   header: {
     flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  subtitle: {
-    opacity: 0.7,
   },
   statusContainer: {
     flexDirection: 'row',

@@ -420,7 +420,16 @@ export default function DocumentScreen() {
      <View style={styles.emptyContainer}>
        <MaterialCommunityIcons name="file-multiple-outline" size={100} color={theme.colors.onSurfaceVariant} style={{marginBottom: BASE_GRID * 2}}/>
        <Text style={styles.emptyText}>No documents yet</Text>
-       <Text style={styles.emptySubText}>Tap the + button to scan your first document.</Text>
+       <Text style={styles.emptySubText}>Add your first document to get started.</Text>
+       <Button 
+         mode="contained" 
+         onPress={() => setAddDocumentModalVisible(true)}
+         style={styles.emptyStateButton}
+         icon="plus"
+         contentStyle={{paddingHorizontal: BASE_GRID * 2, paddingVertical: BASE_GRID}}
+       >
+         Add Document
+       </Button>
      </View>
   );
 
@@ -703,7 +712,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
      fontSize: 18,
-     fontWeight: '400',
+     fontWeight: '600',
      color: '#6B7280', // Muted text
      marginTop: BASE_GRID * 2, // 16px
   },
@@ -711,7 +720,12 @@ const styles = StyleSheet.create({
       fontSize: 14,
       color: 'gray', // Example color
       marginTop: BASE_GRID,
+      marginBottom: BASE_GRID * 3,
       textAlign: 'center',
+  },
+  emptyStateButton: {
+      marginTop: BASE_GRID * 2,
+      borderRadius: BASE_GRID,
   },
   dialogTitle: {
      textAlign: 'center',

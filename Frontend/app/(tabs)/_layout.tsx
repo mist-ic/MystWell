@@ -12,13 +12,12 @@ export default function TabLayout() {
   const theme = useTheme();
 
   const getTabBarIcon = (name: keyof typeof MaterialCommunityIcons.glyphMap, focused: boolean) => {
-    if (focused) return null;
     return (
       <View style={styles.iconContainer}>
         <MaterialCommunityIcons
           name={name}
           size={ICON_SIZE}
-          color='#9E9E9E'
+          color={focused ? theme.colors.primary : '#9E9E9E'}
         />
       </View>
     );
@@ -51,11 +50,6 @@ export default function TabLayout() {
             tabBarIcon: ({ focused }) => (
               <View style={styles.tabItem}>
                 {getTabBarIcon('file-document-outline', focused)}
-                {focused && (
-                  <Text style={[styles.activeLabel, { color: theme.colors.primary }]} numberOfLines={1}>
-                    Document
-                  </Text>
-                )}
               </View>
             ),
           }}
@@ -66,11 +60,6 @@ export default function TabLayout() {
             tabBarIcon: ({ focused }) => (
               <View style={styles.tabItem}>
                 {getTabBarIcon('microphone-outline', focused)}
-                {focused && (
-                  <Text style={[styles.activeLabel, { color: theme.colors.primary }]} numberOfLines={1}>
-                    Record
-                  </Text>
-                )}
               </View>
             ),
           }}
@@ -81,11 +70,6 @@ export default function TabLayout() {
             tabBarIcon: ({ focused }) => (
               <View style={styles.tabItem}>
                 {getTabBarIcon('home', focused)}
-                {focused && (
-                  <Text style={[styles.activeLabel, { color: theme.colors.primary }]} numberOfLines={1}>
-                    Home
-                  </Text>
-                )}
               </View>
             ),
           }}
@@ -96,11 +80,6 @@ export default function TabLayout() {
             tabBarIcon: ({ focused }) => (
               <View style={styles.tabItem}>
                 {getTabBarIcon('chat-outline', focused)}
-                {focused && (
-                  <Text style={[styles.activeLabel, { color: theme.colors.primary }]} numberOfLines={1}>
-                    Chat
-                  </Text>
-                )}
               </View>
             ),
           }}
@@ -111,11 +90,6 @@ export default function TabLayout() {
             tabBarIcon: ({ focused }) => (
               <View style={styles.tabItem}>
                 {getTabBarIcon('pill', focused)}
-                {focused && (
-                  <Text style={[styles.activeLabel, { color: theme.colors.primary }]} numberOfLines={1}>
-                    Medicine
-                  </Text>
-                )}
               </View>
             ),
           }}
@@ -143,19 +117,5 @@ const styles = StyleSheet.create({
     height: ICON_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  activeLabel: {
-    fontSize: 14,
-    fontFamily: Platform.select({
-      ios: '.SFUI-Semibold',
-      android: 'sans-serif-medium'
-    }),
-    fontWeight: '600',
-    letterSpacing: -0.3,
-    textDecorationLine: 'underline',
-    textDecorationColor: 'currentColor',
-    textAlign: 'center',
-    marginTop: 6,
-    paddingHorizontal: 2,
   },
 });
