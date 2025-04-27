@@ -1,11 +1,12 @@
-import React, { useState, useCallback } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react';
+import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { StatusItem } from '@/components/ui/StatusItem';
 import { ReminderItem, ReminderType } from '@/components/ui/ReminderItem';
 import { QuickActionCard } from '@/components/ui/Card/QuickActionCard';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 
@@ -59,6 +60,7 @@ const initialReminders: Reminder[] = [
 export default function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const pathname = usePathname(); // Get current route path
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders);
   
   // --- State for Modification Modal ---
@@ -164,17 +166,20 @@ export default function HomeScreen() {
   // Adjusted height for 3 items
   const reminderContainerHeight = 240; 
 
+  // Ensure this FAB only appears on the home tab
+  const isHomeTab = pathname === '/(tabs)/home';
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      {/* Add StatusBar with dark content (black text) */}
+      <StatusBar style="dark" />
+      
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Top Bar */}
         <View style={styles.topBar}>
           {/* Header */}
           <View style={styles.header}>
-            <Text variant="headlineLarge" style={styles.title}>MystWell</Text>
-            <Text variant="bodyLarge" style={styles.subtitle}>
-              Your health assistant
-            </Text>
+            <Text variant="headlineSmall" style={styles.title}>MystWell</Text>
           </View>
 
           {/* User Profile */}
@@ -338,7 +343,7 @@ export default function HomeScreen() {
       <Portal>
         <FAB.Group
           open={fabOpen}
-          visible={true} 
+          visible={isHomeTab} // Only visible on home tab
           icon={fabOpen ? 'close' : 'plus'}
           actions={[
             {
@@ -397,18 +402,15 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 24,
   },
   header: {
     flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  subtitle: {
-    opacity: 0.7,
   },
   statusContainer: {
     flexDirection: 'row',

@@ -148,24 +148,40 @@ const categorizeRecording = (recording: Recording): Recording => {
   }
 };
 
-// Get status information for a recording
-const getRecordingStatus = (status: string): { color: string; label: string } => {
+// Get status information for a recording - Update to use shorter display labels
+const getRecordingStatus = (status: string): { color: string; icon: string; backgroundColor: string } => {
   switch (status) {
     case 'completed':
-      return { color: '#10B981', label: 'Completed' };
+      return { 
+        color: '#FFFFFF', 
+        icon: 'check-circle', 
+        backgroundColor: '#10B981' 
+      };
     case 'processing':
     case 'transcribing_completed':
     case 'queued':
     case 'pending_upload':
     case 'uploaded':
-      return { color: '#EAB308', label: 'Processing' };
+      return { 
+        color: '#FFFFFF', 
+        icon: 'progress-clock', 
+        backgroundColor: '#EAB308' // Changed to yellow
+      };
     case 'failed':
     case 'transcription_failed':
     case 'analysis_failed':
     case 'download_failed':
-      return { color: '#EF4444', label: 'Failed' };
+      return { 
+        color: '#FFFFFF', 
+        icon: 'alert-circle', 
+        backgroundColor: '#EF4444' 
+      };
     default:
-      return { color: '#6B7280', label: status };
+      return { 
+        color: '#FFFFFF', 
+        icon: 'clock-outline', 
+        backgroundColor: '#6B7280' 
+      };
   }
 };
 
@@ -190,6 +206,8 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
   const { session } = useAuth();
   const soundRef = useRef<Audio.Sound | null>(null);
   const [isReTranscribing, setIsReTranscribing] = useState(false);
+  const menuRef = useRef<View>(null);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
 
   const isPlaying = currentlyPlayingId === recording.id;
   const status = getRecordingStatus(recording.status);
@@ -331,7 +349,20 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     showDeleteConfirmDialog(recording.id, recording.title || 'this recording');
   }, [recording.id, recording.title, showDeleteConfirmDialog]);
 
-  const openMenu = () => setMenuVisible(true);
+  const openMenu = () => {
+    if (menuRef.current) {
+      menuRef.current.measureInWindow((x, y, width, height) => {
+        setMenuPosition({ 
+          x: x + width - 8, 
+          y: y + height + 4 
+        });
+        setMenuVisible(true);
+      });
+    } else {
+      setMenuVisible(true); // Fallback if ref not available
+    }
+  };
+  
   const closeMenu = () => setMenuVisible(false);
 
   // Get the appropriate icon for the recording category
@@ -391,6 +422,10 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     }
   }, [recording.id, session, router, setSnackbarMessage, setSnackbarVisible, closeMenu]);
 
+  // Extract just the time without date for display
+  const timeOnly = formatItemDate(recording.created_at);
+  const durationText = formatDuration(recording.duration || 0);
+  
   return (
     <Surface 
       style={[styles.cardContainer, { backgroundColor: '#FFFFFF' }]} 
@@ -434,59 +469,71 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
             {recording.title || 'Untitled Recording'}
           </Text>
           <Text style={styles.metaText}>
-            {formatSectionDate(recording.created_at)} • {formatItemDate(recording.created_at)} • {formatDuration(recording.duration || 0)}
+            {timeOnly} • {durationText}
           </Text>
         </View>
         
         {/* Right Section (Status and Menu) */}
         <View style={styles.rightSection}>
           {isUpdating ? (
-            <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 12 }} />
+            <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 8 }} />
           ) : (
-            <Chip 
-              style={[styles.statusChip, { backgroundColor: `${status.color}10` }]}
-              textStyle={{ color: status.color, fontSize: 12, fontWeight: '500' }}
-            >
-              {status.label}
-            </Chip>
+            <View style={[styles.statusIconContainer, { backgroundColor: status.backgroundColor }]}>
+              <MaterialCommunityIcons 
+                name={status.icon} 
+                size={14} 
+                color={status.color} 
+              />
+            </View>
           )}
           
-          <Menu
-            visible={menuVisible}
-            onDismiss={closeMenu}
-            anchor={
-              <IconButton
-                icon="dots-vertical"
-                size={24}
-                onPress={openMenu}
-                iconColor="#6B7280"
-                style={styles.menuButton}
-              />
-            }
-            contentStyle={{ backgroundColor: 'white' }}
-          >
-            <Menu.Item 
-              onPress={() => {
-                closeMenu();
-                setIsEditModalVisible(true);
-              }} 
-              title="Rename" 
-              leadingIcon="pencil"
+          <View ref={menuRef}>
+            <IconButton
+              icon="dots-vertical"
+              size={24}
+              onPress={openMenu}
+              iconColor="#6B7280"
+              style={styles.menuButton}
             />
-            <Menu.Item 
-              onPress={handleReTranscribe}
-              title="Re-transcribe" 
-              leadingIcon="refresh"
-              disabled={isReTranscribing}
-            />
-            <Menu.Item 
-              onPress={handleDeleteRequest} 
-              title="Delete" 
-              leadingIcon="delete"
-            />
-          </Menu>
+          </View>
         </View>
       </TouchableOpacity>
+      
+      {/* Add Portal for Menu */}
+      <Portal>
+        <Menu
+          visible={menuVisible}
+          onDismiss={closeMenu}
+          anchor={menuPosition}
+          contentStyle={{ backgroundColor: 'white' }}
+        >
+          <Menu.Item 
+            onPress={() => {
+              closeMenu();
+              setIsEditModalVisible(true);
+            }} 
+            title="Rename" 
+            leadingIcon="pencil"
+          />
+          <Menu.Item 
+            onPress={() => {
+              closeMenu();
+              handleReTranscribe();
+            }} 
+            title="Re-transcribe" 
+            leadingIcon="refresh"
+            disabled={isReTranscribing}
+          />
+          <Menu.Item 
+            onPress={() => {
+              closeMenu();
+              handleDeleteRequest();
+            }} 
+            title="Delete" 
+            leadingIcon="delete"
+          />
+        </Menu>
+      </Portal>
       
       {/* Edit Modal */}
       <Portal>
@@ -1061,6 +1108,9 @@ function RecordScreenContent() {
     );
   };
 
+  // State for search input focus
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style={theme.dark ? "light" : "dark"} />
@@ -1079,6 +1129,8 @@ function RecordScreenContent() {
               style={styles.searchInput}
               outlineStyle={{ borderRadius: 8 }}
               disabled={isRecording}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
               right={
                 searchQuery ? 
                 <TextInput.Icon icon="close" onPress={() => setSearchQuery('')} /> : 
@@ -1094,7 +1146,11 @@ function RecordScreenContent() {
           </View>
           
           {/* Segment Control / Tabs */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScrollContainer}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.tabScrollContainer}
+          >
             <View style={styles.tabContainer}>
               <SegmentedButtons
                 value={activeTab}
@@ -1133,6 +1189,9 @@ function RecordScreenContent() {
           refreshing={isLoadingList && recordings.length > 0}
           onRefresh={isDeleting ? undefined : fetchRecordings}
           stickySectionHeadersEnabled={true}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
         />
         
         {/* Recording UI */}
@@ -1168,15 +1227,13 @@ function RecordScreenContent() {
         
         {/* Floating Action Button */}
         {!isRecording && (
-          <View style={styles.fabContainer}>
-            <TouchableOpacity
-              style={styles.fabButton}
-              onPress={startRecording}
-              disabled={isLoadingList || isSaving || !session}
-            >
-              <MaterialCommunityIcons name="microphone" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={styles.fabButton}
+            onPress={startRecording}
+            disabled={isLoadingList || isSaving || !session}
+          >
+            <MaterialCommunityIcons name="microphone" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
         )}
       </View>
       
@@ -1249,32 +1306,37 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    height: 40,
+    height: 44, // Increased height
     backgroundColor: '#FFFFFF',
     fontSize: 14,
     color: '#374151',
   },
   filterButton: {
     marginLeft: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
   },
   tabScrollContainer: {
     marginBottom: 8,
   },
   tabContainer: {
     flexDirection: 'row',
+    paddingBottom: 8,
   },
   segmentButtons: {
     height: 36,
-    minWidth: 500, // Force horizontal scrolling on narrow screens
+    minWidth: 600, // Force horizontal scrolling
   },
   sectionHeader: {
     paddingVertical: 8,
-    paddingHorizontal: 4,
-    backgroundColor: '#F9FAFB',
-    marginTop: 24,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#F3F4F6',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
+    marginTop: 0,
+    marginBottom: 0,
+    zIndex: 1,
+    elevation: 1,
   },
   sectionHeaderText: {
     fontSize: 14,
@@ -1284,21 +1346,27 @@ const styles = StyleSheet.create({
   },
   cardContainer: {
     borderRadius: 8,
-    marginBottom: 12, // Increased from 8px
+    marginBottom: 12,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
   cardContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16, // Increased from 12px
+    padding: 16,
+    flexWrap: 'nowrap',
   },
   iconContainer: {
-    width: 40, // Increased from 36px
-    height: 40, // Increased from 36px
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
+    flexShrink: 0,
   },
   categoryIcon: {
     position: 'absolute',
@@ -1310,12 +1378,13 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
     marginLeft: 12,
+    minWidth: 0,
   },
   titleText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#111827',
-    marginBottom: 2,
+    marginBottom: 4,
   },
   metaText: {
     fontSize: 14,
@@ -1324,29 +1393,31 @@ const styles = StyleSheet.create({
   rightSection: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+    marginLeft: 8,
   },
-  statusChip: {
-    height: 20,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    maxWidth: 100, // Prevent overflow
+  statusIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   menuButton: {
     margin: 0,
     padding: 8,
-    borderRadius: 20,
-    // Increased touch target
-    width: 40,
-    height: 40,
-  },
-  fabContainer: {
-    position: 'absolute',
-    bottom: 24,
-    width: '100%',
+    borderRadius: 22,
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
   },
   fabButton: {
+    position: 'absolute',
+    right: 24,
+    bottom: 24,
     width: 56,
     height: 56,
     borderRadius: 28,
