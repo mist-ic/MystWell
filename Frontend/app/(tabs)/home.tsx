@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, createContext, useContext } from 'react';
 import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { useRouter, usePathname } from 'expo-router';
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useDocumentModal } from '@/context/DocumentModalContext';
 
 // Define a type for reminders if not already defined
 interface Reminder {
@@ -63,6 +64,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const pathname = usePathname(); // Get current route path
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders);
+  const { showAddDocumentModal } = useDocumentModal();
   
   // --- State for Modification Modal ---
   const [isModifyModalVisible, setIsModifyModalVisible] = useState(false);
@@ -70,6 +72,9 @@ export default function HomeScreen() {
   const [modifiedSchedule, setModifiedSchedule] = useState('');
   const [modifiedDate, setModifiedDate] = useState<Date | undefined>(undefined); // Use Date object
   const [isDatePickerVisible, setDatePickerVisibility] = useState(false); // State for date picker modal
+  
+  // --- State for Add Reminder Modal ---
+  const [isAddReminderModalVisible, setIsAddReminderModalVisible] = useState(false);
   
   // --- Simplified Cart State (Example) ---
   const [cartItems, setCartItems] = useState<string[]>([]); // Store medicine identifiers
@@ -298,7 +303,7 @@ export default function HomeScreen() {
                 title="Add Document"
                 description="Manage medical documents"
                 icon="file-plus-outline"
-                onPress={() => router.push('/document')}
+                onPress={() => showAddDocumentModal()}
               />
               <QuickActionCard
                 title="Health Buddy"
@@ -343,6 +348,63 @@ export default function HomeScreen() {
             </>
           )}
         </Modal>
+        
+        {/* Add Reminder Options Modal */}
+        <Modal
+          visible={isAddReminderModalVisible}
+          onDismiss={() => setIsAddReminderModalVisible(false)}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
+        >
+          <Text variant="titleLarge" style={styles.modalTitle}>Add Reminder</Text>
+          <Text variant="bodyMedium" style={styles.modalSubtitle}>Choose how you want to add a reminder</Text>
+          
+          <View style={styles.modalOptionsContainer}>
+            <TouchableOpacity 
+              style={styles.modalOption}
+              onPress={() => {
+                setIsAddReminderModalVisible(false);
+                // Add logic for manual reminder entry here
+                console.log("Add manually selected");
+              }}
+            >
+              <View style={styles.modalOptionIconContainer}>
+                <MaterialCommunityIcons name="pencil" size={24} color={theme.colors.primary} />
+              </View>
+              <View style={styles.modalOptionContent}>
+                <Text variant="titleMedium" style={styles.modalOptionTitle}>Add Manually</Text>
+                <Text variant="bodySmall" style={styles.modalOptionDescription}>
+                  Create a reminder by entering details yourself
+                </Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.modalOption}
+              onPress={() => {
+                setIsAddReminderModalVisible(false);
+                // Navigate to recording screen
+                router.push('/record');
+              }}
+            >
+              <View style={styles.modalOptionIconContainer}>
+                <MaterialCommunityIcons name="microphone" size={24} color={theme.colors.primary} />
+              </View>
+              <View style={styles.modalOptionContent}>
+                <Text variant="titleMedium" style={styles.modalOptionTitle}>Record</Text>
+                <Text variant="bodySmall" style={styles.modalOptionDescription}>
+                  Create a reminder by recording your voice
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+          
+          <Button 
+            onPress={() => setIsAddReminderModalVisible(false)}
+            style={styles.modalCancelButton}
+          >
+            Cancel
+          </Button>
+        </Modal>
 
         {/* --- Date Picker Modal --- */}
         <DateTimePickerModal
@@ -385,7 +447,7 @@ export default function HomeScreen() {
                 style={styles.fabMenuItem}
                 onPress={() => {
                   setFabOpen(false);
-                  console.log('Add Reminder pressed');
+                  setIsAddReminderModalVisible(true);
                 }}
               >
                 <View style={styles.fabMenuItemIcon}>
@@ -398,7 +460,7 @@ export default function HomeScreen() {
                 style={styles.fabMenuItem}
                 onPress={() => {
                   setFabOpen(false);
-                  router.push('/document');
+                  showAddDocumentModal();
                 }}
               >
                 <View style={styles.fabMenuItemIcon}>
@@ -617,5 +679,60 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 1,
+  },
+  modalContainer: {
+    padding: 24,
+    margin: 20,
+    borderRadius: 16,
+  },
+  modalTitle: {
+    textAlign: 'center',
+    marginBottom: 8,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    textAlign: 'center',
+    marginBottom: 20,
+    color: theme.colors.onSurfaceVariant,
+  },
+  modalOptionsContainer: {
+    gap: 16,
+    marginBottom: 24,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  modalOptionIconContainer: {
+    width: 48, 
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: theme.colors.primaryContainer,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  modalOptionContent: {
+    flex: 1,
+  },
+  modalOptionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  modalOptionDescription: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+  },
+  modalCancelButton: {
+    marginTop: 8,
   },
 }); 
