@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Dimensions, Platform, BackHandler, TouchableOpacity, Animated, Pressable, Image, Alert } from 'react-native';
-import { Text, useTheme, Card, Button, Portal, Modal, Avatar, IconButton, ActivityIndicator, MD3Theme } from 'react-native-paper';
+import { View, StyleSheet, ScrollView, Dimensions, Platform, BackHandler, TouchableOpacity, Animated, Pressable, Image, Alert, Linking, Share } from 'react-native';
+import { Text, useTheme, Card, Button, Portal, Modal, Avatar, IconButton, ActivityIndicator, MD3Theme, Divider, Chip } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { DocumentInfo } from '../app/(tabs)/document';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +17,9 @@ interface DocumentDetailsProps {
   onBack: () => void;
   onRefresh?: () => void;
 }
+
+// Define tab types for better organization
+type TabType = 'summary' | 'details' | 'preview' | 'actions';
 
 const BASE_GRID = 8;
 const PAGE_PADDING_HORIZONTAL = 16;
@@ -42,6 +45,145 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     paddingBottom: PAGE_PADDING_BOTTOM,
     gap: BASE_GRID * 3,
     paddingTop: BASE_GRID * 2,
+  },
+  // Tab navigation styles
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.surfaceVariant,
+  },
+  tabItem: {
+    paddingVertical: BASE_GRID * 1.5,
+    paddingHorizontal: BASE_GRID * 2.5,
+    marginRight: BASE_GRID,
+  },
+  activeTab: {
+    borderBottomWidth: 3,
+    borderBottomColor: theme.colors.primary,
+  },
+  tabText: {
+    fontSize: 15,
+    fontFamily: 'Inter-Medium',
+  },
+  activeTabText: {
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  infoSection: {
+    marginBottom: BASE_GRID * 3,
+  },
+  // Document cards styling
+  documentCard: {
+    marginBottom: BASE_GRID * 2,
+    borderRadius: BASE_GRID,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.outline,
+    overflow: 'hidden',
+  },
+  cardContent: {
+    padding: BASE_GRID * 2,
+  },
+  // Header styling
+  cardHeader: {
+    marginBottom: BASE_GRID,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter-SemiBold',
+    fontWeight: '700',
+    color: theme.colors.primary,
+    marginBottom: 12,
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Inter-Regular',
+    color: theme.colors.onSurfaceVariant,
+  },
+  // Content rows styling
+  infoRow: {
+    marginBottom: BASE_GRID * 2,
+    paddingBottom: BASE_GRID,
+  },
+  infoLabel: {
+    fontSize: 14,
+    fontFamily: 'Inter-SemiBold',
+    fontWeight: '600',
+    color: theme.colors.secondary,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: 16,
+    fontFamily: 'Inter-Regular',
+    color: theme.colors.onSurface,
+    lineHeight: 22,
+  },
+  // Test results styling
+  testResultsContainer: {
+    marginTop: BASE_GRID,
+  },
+  testResultItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: BASE_GRID,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.surfaceVariant,
+  },
+  testNameContainer: {
+    flex: 2,
+  },
+  testName: {
+    fontSize: 15,
+    fontFamily: 'Inter-Medium',
+    color: theme.colors.onSurface,
+    marginBottom: 2,
+  },
+  testValueContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  testValue: {
+    fontSize: 16,
+    fontFamily: 'Inter-SemiBold',
+    fontWeight: '600',
+  },
+  testStatusContainer: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  testStatusText: {
+    fontSize: 12,
+    fontFamily: 'Inter-SemiBold',
+    fontWeight: '600',
+  },
+  // Status chip styling
+  statusChip: {
+    height: 32,
+    borderRadius: 16,
+  },
+  statusChipText: {
+    fontSize: 13,
+    fontFamily: 'Inter-Medium',
+    marginVertical: 0,
+    marginHorizontal: 8,
+  },
+  // Actions section styling
+  actionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: BASE_GRID,
+    marginTop: BASE_GRID,
+  },
+  actionButton: {
+    borderRadius: 8,
+    flex: 1,
+    minWidth: 150,
   },
   summaryCard: {
     borderRadius: BASE_GRID,
@@ -248,27 +390,6 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     padding: BASE_GRID * 2,
   },
   pressedCard: {
-    opacity: 0.8,
-    transform: [{ scale: 0.98 }],
-  },
-  errorSection: {
-    marginTop: BASE_GRID * 2,
-    padding: BASE_GRID * 1.5,
-    backgroundColor: theme.colors.errorContainer,
-    borderRadius: BASE_GRID,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  errorText: {
-    flex: 1,
-    marginRight: BASE_GRID,
-  },
-  retryButton: {
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
   },
 });
 
@@ -357,6 +478,35 @@ const getStatusDisplayDetails = (status: DocumentInfo['status']): StatusDisplay 
     };
 };
 
+// Helper function to determine abnormal test values and their status
+const getTestValueStatus = (value: string, refRange: string) => {
+  if (!value || !refRange) return { status: 'normal', color: '#10B981' };
+  
+  try {
+    // Extract numeric value
+    const numericValue = parseFloat(value.split(' ')[0]);
+    if (isNaN(numericValue)) return { status: 'normal', color: '#10B981' };
+
+    // Check if reference range specifies high/low
+    if (refRange.includes('High')) return { status: 'high', color: '#EF4444' };
+    if (refRange.includes('Low')) return { status: 'low', color: '#F59E0B' };
+
+    // Parse reference range as min-max
+    const rangeParts = refRange.match(/[\d.]+/g);
+    if (!rangeParts || rangeParts.length < 2) return { status: 'normal', color: '#10B981' };
+    
+    const min = parseFloat(rangeParts[0]);
+    const max = parseFloat(rangeParts[1]);
+    
+    if (numericValue < min) return { status: 'low', color: '#F59E0B' };
+    if (numericValue > max) return { status: 'high', color: '#EF4444' };
+    
+    return { status: 'normal', color: '#10B981' };
+  } catch (e) {
+    return { status: 'normal', color: '#10B981' };
+  }
+};
+
 export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetailsProps) {
   const theme = useTheme<MD3Theme>();
   const router = useRouter();
@@ -367,6 +517,8 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
   const [mimeType, setMimeType] = useState<string | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  // State for active tab
+  const [activeTab, setActiveTab] = useState<TabType>('summary');
 
   const styles = React.useMemo(() => createStyles(theme), [theme]);
 
@@ -391,27 +543,38 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
           throw new Error(errorMsg);
       }
       const data = await response.json();
-      console.log(`Preview details received: URL=${data.downloadUrl}, MimeType=${data.mimeType}`);
-      setImageUrl(data.downloadUrl);
-      setMimeType(data.mimeType);
+      console.log(`Preview details received:`, data);
+      
+      if (data && data.downloadUrl) {
+        setImageUrl(data.downloadUrl);
+        setMimeType(data.mimeType || 'application/octet-stream');
+        console.log(`Preview URL set: ${data.downloadUrl}, MimeType: ${data.mimeType}`);
+      } else {
+        console.warn("No preview URL received from backend");
+      }
     } catch (error: any) {
       console.error("Error fetching preview details:", error);
-      Alert.alert("Error", `Could not load document preview. ${error.message}`);
+      // Don't show alert as this disrupts UX, just log the error
     } finally {
       setIsLoadingImage(false);
     }
   }, [document.id, session]);
 
   useEffect(() => {
-    if (isReady) {
-      fetchPreviewDetails();
+    let retryTimeout: NodeJS.Timeout;
+    
+    if (isReady && !imageUrl && !isLoadingImage) {
+      // Try again after a brief delay if the first attempt didn't work
+      retryTimeout = setTimeout(() => {
+        console.log("Retrying preview fetch automatically");
+        fetchPreviewDetails();
+      }, 2000);
     }
+    
     return () => {
-        setImageUrl(null);
-        setMimeType(null);
-        setIsLoadingImage(false);
-    }
-  }, [document.id, isReady, fetchPreviewDetails]);
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
+  }, [isReady, imageUrl, isLoadingImage, fetchPreviewDetails]);
 
   useEffect(() => {
     const handleBack = () => {
@@ -516,147 +679,596 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
     }
   };
 
-  return (
-    <SafeAreaView style={styles.pageContainer} edges={['top', 'left', 'right']}>
-      <AppHeader title={document.display_name || "Document Details"} onBackPress={handleBackPress} />
-      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContentContainer}>
-        <View style={[styles.aiHeaderLeft, { marginBottom: BASE_GRID }]}>
-          <MaterialCommunityIcons 
-            name="text-box-search-outline"
-            size={24} 
-            color={theme.colors.primary}
-            style={styles.aiIcon}
-          />
-          <View style={styles.aiSummaryTitle}>
-            <Text style={styles.aiTitleText}>Extracted Information</Text>
-            <Text style={styles.aiSubtitleText}>
-              {document.detected_document_type || 'Details from document'}
-            </Text>
-          </View>
-        </View>
+  // Render the summary tab content
+  const renderSummaryTab = () => {
+    if (!document.structured_data) {
+      return (
+        <Card style={styles.documentCard}>
+          <Card.Content style={styles.cardContent}>
+            <Text style={styles.summaryBodyText}>No summary information available.</Text>
+          </Card.Content>
+        </Card>
+      );
+    }
+
+    const data = document.structured_data;
+    
+    return (
+      <View>
+        <Card style={[styles.documentCard, { elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+          <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 3 }]}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Document Overview</Text>
+            </View>
+            
+            <View style={[styles.infoRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceVariant }]}>
+              <Text style={styles.infoLabel}>Document Type</Text>
+              <Text style={styles.infoValue}>{data.detected_document_type || "Lab Report"}</Text>
+            </View>
+            
+            <View style={[styles.infoRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceVariant }]}>
+              <Text style={styles.infoLabel}>Patient</Text>
+              <Text style={styles.infoValue}>{data.patient_name || "Not specified"}</Text>
+            </View>
+            
+            <View style={[styles.infoRow, { borderBottomWidth: 1, borderBottomColor: theme.colors.surfaceVariant }]}>
+              <Text style={styles.infoLabel}>Provider</Text>
+              <Text style={styles.infoValue}>{data.provider_name || "Not specified"}</Text>
+            </View>
+            
+            <View style={[styles.infoRow, { borderBottomWidth: data.summary ? 1 : 0, borderBottomColor: theme.colors.surfaceVariant }]}>
+              <Text style={styles.infoLabel}>Date</Text>
+              <Text style={styles.infoValue}>{data.date_of_service || "Not specified"}</Text>
+            </View>
+            
+            {data.summary && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Summary</Text>
+                <Text style={styles.infoValue}>{data.summary}</Text>
+              </View>
+            )}
+          </Card.Content>
+        </Card>
+        
         <Button
-          mode="outlined"
+          mode="contained-tonal"
           icon={({ size, color }) => (
             <MaterialCommunityIcons 
               name="message-processing" 
-              size={16}
+              size={18}
               color={color}
               style={styles.buttonIcon}
             />
           )}
           onPress={handleTalkToAI}
-          style={[styles.talkAiButton, { borderColor: theme.colors.primary }]}
-          labelStyle={[styles.talkAiButtonLabel, { color: theme.colors.primary }]}
-          contentStyle={styles.talkAiButtonContent}
+          style={[{ 
+            marginTop: BASE_GRID * 2,
+            borderRadius: 8,
+            height: 48,
+          }]}
+          contentStyle={{ height: 48 }}
         >
           Talk to AI
         </Button>
-
-        <View style={styles.aiSummaryContent}>
-          {renderStructuredData(document.structured_data, theme, styles)}
-        </View>
-
-        {document.status === 'processing_failed' && (
-          <View style={styles.errorSection}>
-              <MaterialCommunityIcons name="alert-circle-outline" color={theme.colors.error} size={20} style={{ marginRight: BASE_GRID }} />
-              <Text style={[styles.errorText, { color: theme.colors.error }]}>
-                  Processing failed: {document.error_message || 'Unknown error'}
+      </View>
+    );
+  };
+  
+  // Render the details tab content with test results
+  const renderDetailsTab = () => {
+    if (!document.structured_data) {
+      return (
+        <Card style={styles.documentCard}>
+          <Card.Content style={styles.cardContent}>
+            <Text style={[styles.summaryBodyText, { fontFamily: 'Inter-Regular' }]}>No detailed information available.</Text>
+          </Card.Content>
+        </Card>
+      );
+    }
+    
+    const data = document.structured_data;
+    let testResults = [];
+    
+    // Check if key_information exists and is an array
+    if (data.key_information && Array.isArray(data.key_information)) {
+      testResults = data.key_information;
+    } else if (typeof data.key_information === 'string') {
+      // Split string by newlines if it's a string
+      testResults = data.key_information.split('\n').filter(line => line.trim());
+    }
+    
+    return (
+      <View>
+        <Card style={[styles.documentCard, { elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+          <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 3 }]}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Key Information</Text>
+            </View>
+            
+            <View style={styles.testResultsContainer}>
+              {testResults.length > 0 ? (
+                testResults.map((item, index) => {
+                  let testName = '';
+                  let testValue = '';
+                  let reference = '';
+                  
+                  if (typeof item === 'string') {
+                    // Parse string format like "Urea: 15.93 mg/dL (Low - Bio Ref Interval: 17.00 - 43.00)"
+                    const parts = item.split(':');
+                    if (parts.length >= 2) {
+                      testName = parts[0].trim();
+                      // Extract value and reference range
+                      const valueParts = parts.slice(1).join(':').split('(');
+                      testValue = valueParts[0].trim();
+                      reference = valueParts.length > 1 ? `(${valueParts[1]}` : '';
+                    } else {
+                      testName = item;
+                    }
+                  } else if (typeof item === 'object') {
+                    // Handle object format if API returns structured data
+                    testName = item.name || '';
+                    testValue = item.value || '';
+                    reference = item.reference || '';
+                  }
+                  
+                  const valueStatus = getTestValueStatus(testValue, reference);
+                  
+                  return (
+                    <View key={`test-${index}`} style={[styles.testResultItem, { paddingVertical: BASE_GRID * 1.5 }]}>
+                      <View style={styles.testNameContainer}>
+                        <Text style={styles.testName}>{testName}</Text>
+                        {reference && (
+                          <Text style={{ 
+                            fontFamily: 'Inter-Regular',
+                            fontSize: 12,
+                            color: theme.colors.onSurfaceVariant,
+                            lineHeight: 16
+                          }}>
+                            {reference}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.testValueContainer}>
+                        <Text 
+                          style={[
+                            styles.testValue, 
+                            { color: valueStatus.color }
+                          ]}
+                        >
+                          {testValue}
+                        </Text>
+                        {valueStatus.status !== 'normal' && (
+                          <View style={[styles.testStatusContainer, { backgroundColor: `${valueStatus.color}15` }]}>
+                            <Text style={[styles.testStatusText, { color: valueStatus.color }]}>
+                              {valueStatus.status === 'high' ? 'HIGH' : 'LOW'}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={[styles.summaryBodyText, { 
+                  fontFamily: 'Inter-Regular'
+                }]}>No test results available.</Text>
+              )}
+            </View>
+          </Card.Content>
+        </Card>
+        
+        {data.medications_mentioned && (
+          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+            <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 2 }]}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Medications Mentioned</Text>
+              </View>
+              <Text style={styles.infoValue}>
+                {typeof data.medications_mentioned === 'string' 
+                  ? data.medications_mentioned 
+                  : 'None'}
               </Text>
-              <Button 
-                  mode="contained" 
-                  onPress={handleRetry}
-                  style={styles.retryButton}
-                  labelStyle={{ marginHorizontal: 0}}
-                  compact
-                  loading={isRetrying}
-                  disabled={isRetrying}
-              >
-                  Retry Processing
-              </Button>
-          </View>
+            </Card.Content>
+          </Card>
         )}
-
-        <View style={styles.previewSectionOuter}>
-          <Text style={[styles.previewSectionTitle, { color: theme.colors.secondary }]}>Original Document</Text>
-          <Pressable 
-            onPress={handlePreviewPress} 
-            style={({ pressed }) => [
-              styles.previewCardContainer,
-              pressed && styles.pressedCard,
-            ]}
-            disabled={isLoadingImage}
-           >
-            {isLoadingImage ? (
-                <ActivityIndicator style={styles.loader} size="large" />
-            ) : imageUrl && mimeType?.startsWith('image/') ? (
-                <Image source={{ uri: imageUrl }} style={styles.previewImage} resizeMode="contain" />
-            ) : imageUrl && mimeType === 'application/pdf' ? (
-                 <View style={[styles.previewCard, styles.previewPlaceholder]}>
-                    <MaterialCommunityIcons name="file-pdf-box" size={48} color={theme.colors.primary} style={styles.pdfIcon} />
-                   <Text style={[styles.previewLabel, { color: theme.colors.onSurfaceVariant }]}>PDF Document</Text>
-                   <Text style={[styles.aiSubtitleText, { textAlign: 'center' }]}>Tap to view (may open externally)</Text>
-                </View>
-            ) : (
-                <View style={[styles.previewCard, styles.previewPlaceholder]}>
-                    <MaterialCommunityIcons name="file-alert-outline" size={48} color={theme.colors.onSurfaceVariant} style={styles.pdfIcon} />
-                   <Text style={[styles.previewLabel, { color: theme.colors.onSurfaceVariant }]}>
-                     {isProcessing ? "Processing..." : isReady ? "Preview Unavailable" : "Preview Error"}
-                   </Text>
-                </View>
-            )}
-          </Pressable>
-        </View>
-
-        <View style={styles.actionsSection}>
-          <Button
-            mode="contained"
-            icon="download"
-            onPress={() => {/* Handle download */}}
-            style={styles.actionButtonPrimary}
-            labelStyle={styles.actionButtonLabel}
-            contentStyle={styles.actionButtonContent}
-            theme={{ roundness: BASE_GRID / theme.roundness }}
-          >
-            Download
-          </Button>
-          <Button
-            mode="outlined"
-            icon="share-variant"
-            onPress={() => {/* Handle share */}}
-            style={[styles.actionButtonSecondary, { borderColor: theme.colors.primary }]}
-            labelStyle={styles.actionButtonLabel}
-            contentStyle={styles.actionButtonContent}
-            theme={{ roundness: BASE_GRID / theme.roundness }}
-          >
-            Share
-          </Button>
-        </View>
-      </ScrollView>
-
-      <Portal>
-        <Modal
-          visible={showFullDocument && mimeType?.startsWith('image/')}
-          onDismiss={() => setShowFullDocument(false)}
-          contentContainerStyle={[
-            styles.modalContainer,
-            { backgroundColor: theme.colors.background }
-          ]}
+        
+        {data.follow_up_instructions && (
+          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+            <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 2 }]}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Follow Up Instructions</Text>
+              </View>
+              <Text style={styles.infoValue}>
+                {typeof data.follow_up_instructions === 'string' 
+                  ? data.follow_up_instructions 
+                  : 'No follow-up instructions provided.'}
+              </Text>
+            </Card.Content>
+          </Card>
+        )}
+      </View>
+    );
+  };
+  
+  // Render the preview tab content
+  const renderPreviewTab = () => {
+    console.log("Rendering preview tab, imageUrl:", imageUrl, "mimeType:", mimeType, "isReady:", isReady);
+    
+    return (
+      <View style={styles.previewSectionOuter}>
+        <TouchableOpacity 
+          onPress={handlePreviewPress}
+          style={styles.previewCardContainer}
+          disabled={isLoadingImage}
         >
-          <Image 
-                source={{ uri: imageUrl || undefined }} 
-                style={styles.fullImage} 
-                resizeMode="contain" 
+          {isLoadingImage ? (
+            <View style={styles.previewCard}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={[styles.previewLabel, { marginTop: 12 }]}>Loading preview...</Text>
+            </View>
+          ) : imageUrl ? (
+            mimeType?.startsWith('image/') ? (
+              <Image
+                source={{ uri: imageUrl }}
+                style={{ width: '100%', height: '100%', resizeMode: 'contain' }}
+                onError={(e) => {
+                  console.error("Image loading error:", e.nativeEvent.error);
+                  // Clear image URL on error to show fallback
+                  setImageUrl(null);
+                }}
+              />
+            ) : mimeType === 'application/pdf' ? (
+              <View style={styles.previewCard}>
+                <MaterialCommunityIcons
+                  name="file-pdf-box"
+                  size={48}
+                  color={theme.colors.primary}
+                  style={styles.pdfIcon}
+                />
+                <Text style={styles.previewLabel}>Tap to view PDF</Text>
+              </View>
+            ) : (
+              <View style={styles.previewCard}>
+                <MaterialCommunityIcons
+                  name="file-document-outline"
+                  size={48}
+                  color={theme.colors.onSurfaceVariant}
+                  style={styles.pdfIcon}
+                />
+                <Text style={styles.previewLabel}>Preview available</Text>
+                <Text style={styles.aiSubtitleText}>Tap to open document</Text>
+              </View>
+            )
+          ) : isReady ? (
+            <View style={styles.previewCard}>
+              <MaterialCommunityIcons
+                name="refresh"
+                size={48}
+                color={theme.colors.onSurfaceVariant}
+                style={styles.pdfIcon}
+              />
+              <Text style={styles.previewLabel}>Unable to load preview</Text>
+              <Button
+                mode="text"
+                onPress={fetchPreviewDetails}
+                style={{ marginTop: 8 }}
+                labelStyle={{ fontSize: 14 }}
+              >
+                Retry
+              </Button>
+            </View>
+          ) : (
+            <View style={styles.previewCard}>
+              <MaterialCommunityIcons
+                name="file-document-outline"
+                size={48}
+                color={theme.colors.onSurfaceVariant}
+                style={styles.pdfIcon}
+              />
+              <Text style={styles.previewLabel}>Preview not available</Text>
+              {!isReady && <Text style={styles.aiSubtitleText}>{statusDisplay.text}</Text>}
+            </View>
+          )}
+        </TouchableOpacity>
+        
+        <View style={styles.actionsSection}>
+          {isReady && (
+            <Button
+              mode="contained"
+              icon="download"
+              onPress={() => {
+                if (imageUrl) {
+                  // Try to download the document
+                  Alert.alert(
+                    "Download Document",
+                    "Would you like to download this document?",
+                    [
+                      {
+                        text: "Cancel",
+                        style: "cancel"
+                      },
+                      {
+                        text: "Download",
+                        onPress: () => {
+                          // Here you'd implement the actual download
+                          // For now, we'll just open the URL which may trigger download
+                          if (Platform.OS === 'web') {
+                            window.open(imageUrl, '_blank');
+                          } else {
+                            Linking.openURL(imageUrl).catch(err => 
+                              console.error("Failed to open URL:", err)
+                            );
+                          }
+                        }
+                      }
+                    ]
+                  );
+                } else {
+                  // Try to fetch the preview URL first
+                  fetchPreviewDetails().then(() => {
+                    if (imageUrl) {
+                      Alert.alert("Ready to download", "The document is now ready to download.");
+                    } else {
+                      Alert.alert("Download Error", "Unable to prepare document for download.");
+                    }
+                  });
+                }
+              }}
+              style={styles.actionButtonPrimary}
+              contentStyle={styles.actionButtonContent}
+              labelStyle={styles.actionButtonLabel}
+            >
+              Download
+            </Button>
+          )}
+          
+          {isReady && (
+            <Button
+              mode="outlined"
+              icon="share-variant"
+              onPress={() => {
+                // Share functionality
+                if (imageUrl) {
+                  // Try to share the document URL
+                  if (Platform.OS !== 'web') {
+                    Share.share({
+                      url: imageUrl,
+                      title: document.display_name || 'Document',
+                      message: `Check out this document: ${document.display_name || 'Document'}`
+                    }).catch(error => console.error("Share error:", error));
+                  } else {
+                    // Web fallback
+                    Alert.alert("Share", "Sharing is not available on web.");
+                  }
+                } else {
+                  // Try to fetch the preview URL first
+                  fetchPreviewDetails().then(() => {
+                    if (imageUrl) {
+                      if (Platform.OS !== 'web') {
+                        Share.share({
+                          url: imageUrl,
+                          title: document.display_name || 'Document',
+                          message: `Check out this document: ${document.display_name || 'Document'}`
+                        }).catch(error => console.error("Share error:", error));
+                      } else {
+                        Alert.alert("Share", "Sharing is not available on web.");
+                      }
+                    } else {
+                      Alert.alert("Share Error", "Unable to prepare document for sharing.");
+                    }
+                  });
+                }
+              }}
+              style={styles.actionButtonSecondary}
+              contentStyle={styles.actionButtonContent}
+              labelStyle={styles.actionButtonLabel}
+            >
+              Share
+            </Button>
+          )}
+        </View>
+      </View>
+    );
+  };
+  
+  // Render the actions tab content
+  const renderActionsTab = () => {
+    return (
+      <View>
+        <Card style={styles.documentCard}>
+          <Card.Content style={styles.cardContent}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Document Actions</Text>
+            </View>
+            
+            <View style={styles.actionsContainer}>
+              <Button
+                mode="contained"
+                icon="chat-processing"
+                onPress={handleTalkToAI}
+                style={styles.actionButton}
+              >
+                Chat with AI
+              </Button>
+              
+              <Button
+                mode="contained-tonal"
+                icon="calendar"
+                onPress={() => {
+                  Alert.alert("Schedule", "Schedule doctor visit based on results.");
+                }}
+                style={styles.actionButton}
+              >
+                Schedule Visit
+              </Button>
+              
+              <Button
+                mode="contained-tonal"
+                icon="bell-plus"
+                onPress={() => {
+                  Alert.alert("Reminder", "Set reminder for follow-up.");
+                }}
+                style={styles.actionButton}
+              >
+                Set Reminder
+              </Button>
+              
+              <Button
+                mode="contained-tonal"
+                icon="file-edit"
+                onPress={() => {
+                  Alert.alert("Edit", "Edit document information.");
+                }}
+                style={styles.actionButton}
+              >
+                Edit Details
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+        
+        {isFailed && (
+          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, backgroundColor: theme.colors.errorContainer }]}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardTitle, { color: theme.colors.error }]}>Processing Failed</Text>
+              </View>
+              <Text style={[styles.infoValue, { color: theme.colors.onErrorContainer, marginBottom: BASE_GRID * 2 }]}>
+                Document processing failed. You can try processing again.
+              </Text>
+              <Button
+                mode="contained"
+                icon="refresh"
+                onPress={handleRetry}
+                loading={isRetrying}
+                disabled={isRetrying}
+                buttonColor={theme.colors.error}
+              >
+                Try Again
+              </Button>
+            </Card.Content>
+          </Card>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.pageContainer} edges={['top', 'left', 'right']}>
+      <AppHeader title={document.display_name || "Document Details"} onBackPress={handleBackPress} />
+      
+      {/* Tab Navigation */}
+      <View style={styles.tabsContainer}>
+        <TouchableOpacity 
+          style={[styles.tabItem, activeTab === 'summary' && styles.activeTab]}
+          onPress={() => setActiveTab('summary')}
+        >
+          <Text style={[
+            styles.tabText, 
+            activeTab === 'summary' && styles.activeTabText
+          ]}>
+            Summary
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tabItem, activeTab === 'details' && styles.activeTab]}
+          onPress={() => setActiveTab('details')}
+        >
+          <Text style={[
+            styles.tabText, 
+            activeTab === 'details' && styles.activeTabText
+          ]}>
+            Details
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tabItem, activeTab === 'preview' && styles.activeTab]}
+          onPress={() => setActiveTab('preview')}
+        >
+          <Text style={[
+            styles.tabText, 
+            activeTab === 'preview' && styles.activeTabText
+          ]}>
+            Preview
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tabItem, activeTab === 'actions' && styles.activeTab]}
+          onPress={() => setActiveTab('actions')}
+        >
+          <Text style={[
+            styles.tabText, 
+            activeTab === 'actions' && styles.activeTabText
+          ]}>
+            Actions
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Status Chip */}
+      <View style={{ paddingHorizontal: PAGE_PADDING_HORIZONTAL, marginBottom: BASE_GRID * 2, marginTop: BASE_GRID }}>
+        {isReady ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <MaterialCommunityIcons name="check-circle" size={20} color="#10B981" />
+            <Text style={{ 
+              fontFamily: 'Inter-Medium', 
+              fontSize: 14, 
+              color: '#10B981',
+              marginLeft: 6
+            }}>
+              Ready
+            </Text>
+          </View>
+        ) : (
+          <Chip 
+            icon={() => (
+              isProcessing ? 
+                <ActivityIndicator size={16} color={statusDisplay.color} /> : 
+                <MaterialCommunityIcons name={
+                  isFailed ? "alert-circle" : 
+                  "clock-outline"
+                } size={16} color={statusDisplay.color} />
+            )}
+            style={[styles.statusChip, { backgroundColor: `${statusDisplay.color}15` }]}
+            textStyle={[styles.statusChipText, { color: statusDisplay.color }]}
+          >
+            {statusDisplay.text}
+          </Chip>
+        )}
+      </View>
+      
+      {/* Tab Content */}
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContentContainer}>
+        {activeTab === 'summary' && renderSummaryTab()}
+        {activeTab === 'details' && renderDetailsTab()}
+        {activeTab === 'preview' && renderPreviewTab()}
+        {activeTab === 'actions' && renderActionsTab()}
+      </ScrollView>
+      
+      {/* Full Document Preview Modal */}
+      {showFullDocument && (
+        <Portal>
+          <Modal visible={showFullDocument} onDismiss={() => setShowFullDocument(false)} contentContainerStyle={styles.modalContainer}>
+            <IconButton
+              icon="close"
+              iconColor="white"
+              size={24}
+              onPress={() => setShowFullDocument(false)}
+              style={styles.closeButton}
             />
-             <IconButton
-                icon="close"
-                size={30}
-                onPress={() => setShowFullDocument(false)}
-                style={styles.closeButton}
-                iconColor={theme.colors.onPrimary}
-                containerColor={theme.colors.backdrop}
-             />
-        </Modal>
-      </Portal>
+            {imageUrl && (
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.fullImage}
+                resizeMode="contain"
+              />
+            )}
+          </Modal>
+        </Portal>
+      )}
     </SafeAreaView>
   );
 }

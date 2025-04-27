@@ -26,36 +26,44 @@ interface Reminder {
 const initialReminders: Reminder[] = [
   {
     id: '1',
-    title: "Take Vitamin D",
-    schedule: "Before Breakfast",
+    title: "Take MB Multivitamin",
+    schedule: "Morning",
     type: "meal",
-    medicineIdentifier: "Vitamin D 500IU",
+    medicineIdentifier: "MB Multivitamin",
   },
   {
     id: '2',
-    title: "Blood Pressure Check",
-    schedule: "After Lunch",
-    type: "check",
+    title: "Take Creatine",
+    schedule: "After gym",
+    type: "meal",
+    medicineIdentifier: "Creatine 5g",
   },
   {
     id: '3',
-    title: "Dr. Smith Appointment",
-    schedule: "03:00 PM",
-    date: "2024-07-22", // Example date
-    type: "appointment",
+    title: "Take Dolo 650mg",
+    schedule: "After dinner",
+    type: "meal",
+    medicineIdentifier: "Dolo 650mg",
   },
   {
     id: '4',
-    title: "Take Blood Sugar Reading",
-    schedule: "Before Dinner",
-    type: "check",
+    title: "Drink Protein Shake",
+    schedule: "Post workout",
+    type: "meal",
+    medicineIdentifier: "Whey Protein",
   },
   {
     id: '5',
-    title: "Evening Medicine",
-    schedule: "After Dinner",
+    title: "Take Fish Oil",
+    schedule: "With breakfast",
     type: "meal",
-    medicineIdentifier: "Metformin 500mg",
+    medicineIdentifier: "Omega 3 Fish Oil",
+  },
+  {
+    id: '6',
+    title: "Gym Session",
+    schedule: "5:30 PM",
+    type: "appointment",
   },
 ];
 
@@ -217,7 +225,7 @@ export default function HomeScreen() {
         {/* Greeting */}
         <View style={styles.greetingContainer}>
           <Text variant="titleLarge" style={styles.greetingText}>
-            {greeting}, Sarah 👋
+            {greeting}, Poorav 👋
           </Text>
         </View>
 
