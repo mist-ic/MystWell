@@ -14,6 +14,7 @@ import { useAuth } from '@/context/auth';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
+import { checkShouldShowDocumentModal } from '@/context/DocumentModalContext';
 
 // Define API Base URL (TODO: Move to central config/env)
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
@@ -103,6 +104,14 @@ export default function DocumentScreen() {
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
+
+  // Check if we should open the add document modal (triggered from another screen)
+  useEffect(() => {
+    const shouldShowModal = checkShouldShowDocumentModal();
+    if (shouldShowModal) {
+      setAddDocumentModalVisible(true);
+    }
+  }, []);
 
   // --- Polling for status updates (Revised Logic) ---
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
