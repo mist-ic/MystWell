@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, InternalServerErrorException, ForbiddenException, UnauthorizedException, Logger } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
+import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants';
 import { v4 as uuidv4 } from 'uuid';
 import { ProfileService } from '../profile/profile.service';
 import { Profile } from '../profile/profile.service';
@@ -187,14 +187,16 @@ export class RecordingService {
   /**
    * Creates metadata and generates a signed URL for upload for the authenticated user.
    */
-  async getUploadUrl(userId: string, title: string, duration: number): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
+  async getUploadUrl(userId: string): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
     const profileId = await this.getProfileIdFromUserId(userId);
     const recordingId = uuidv4();
     const storagePath = `${profileId}/${recordingId}.m4a`;
 
     this.logger.log(`[RecordingService] Generating upload URL for path: ${storagePath}`);
 
-    const recordingMetadata = await this.createRecordingMetadata(profileId, title, duration, storagePath, recordingId);
+    // Provide default title and 0 duration when creating metadata
+    const defaultTitle = `Recording - ${new Date().toLocaleString()}`;
+    const recordingMetadata = await this.createRecordingMetadata(profileId, defaultTitle, 0, storagePath, recordingId);
 
     // Use service role client for storage operations
     const { data: urlData, error: urlError } = await this.supabaseServiceRole.storage

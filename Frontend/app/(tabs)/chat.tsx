@@ -20,7 +20,14 @@ import { Text, useTheme, Snackbar, Surface, Avatar } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { MessageSkeleton } from '../../components/MessageSkeleton';
+import { MessageSkeleton } from '@/components/MessageSkeleton';
+import { sendMessageToMist } from '@/services/chatService';
+
+// Define Interfaces
+interface ApiChatMessage {
+  role: 'user' | 'model';
+  parts: { text: string }[];
+}
 
 interface ChatMessage {
   id: string;
@@ -30,8 +37,180 @@ interface ChatMessage {
   timestamp: number;
 }
 
+// Constants
 const INPUT_HEIGHT = 56;
 const INPUT_CONTAINER_HEIGHT = Platform.OS === 'ios' ? 80 : 64;
+
+// Styles (Moved before the component function)
+const styles = StyleSheet.create({
+  flexOne: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+  },
+  header: {
+    height: 60,
+    width: '100%',
+    borderBottomWidth: 1,
+  },
+  headerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  headerButton: {
+    padding: 8,
+  },
+  headerTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  messagesContainer: {
+    padding: 16,
+    paddingBottom: 80,
+  },
+  messageRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    alignItems: 'flex-end',
+  },
+  userRow: {
+    justifyContent: 'flex-end',
+  },
+  aiRow: {
+    justifyContent: 'flex-start',
+  },
+  avatar: {
+    marginHorizontal: 4,
+    marginBottom: 2,
+  },
+  messageBubble: {
+    maxWidth: '80%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  messageInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  sendingMessage: {
+    opacity: 0.7,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  input: {
+    flex: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    fontSize: 16,
+    marginRight: 8,
+    textAlignVertical: 'center',
+    maxHeight: 120,
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  actionButton: {
+    padding: 8,
+    marginBottom: 4,
+  },
+  sendButton: {
+    padding: 4,
+  },
+  sendButtonDisabled: {
+    opacity: 0.7,
+  },
+  inputAccessory: {
+    height: 44,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  doneButton: {
+    fontWeight: '600',
+    fontSize: 17,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  typingContainer: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  bottomContainer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  userMessage: {
+    borderBottomRightRadius: 4,
+    marginLeft: 'auto',
+  },
+  aiMessage: {
+    borderBottomLeftRadius: 4,
+    marginRight: 'auto',
+  },
+  timeText: {
+    fontSize: 10,
+    marginLeft: 'auto',
+  },
+  retryText: {
+    fontSize: 10,
+    textDecorationLine: 'underline',
+  },
+  listContentContainer: {
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
+    flexGrow: 1,
+  },
+});
 
 // Typing Indicator component
 const TypingIndicator = () => {
@@ -67,6 +246,7 @@ const MessageTime = ({ timestamp }: { timestamp: number }) => {
   );
 };
 
+// Main Component
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -204,152 +384,157 @@ export default function ChatScreen() {
     }
   }, []);
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim()) return;
-    
-    // Clear input and scroll to bottom
-    setInput('');
-    flatListRef.current?.scrollToEnd({ animated: true });
-    
-    const tempId = Date.now().toString();
-    const newMessage: ChatMessage = {
-      id: tempId,
-      text,
-      isUser: true,
-      status: 'sent', // Optimistic update
-      timestamp: Date.now(),
-    };
+  // Function to format UI messages for the backend API
+  const formatHistoryForApi = (history: ChatMessage[]): ApiChatMessage[] => {
+    return history
+      // Filter out any messages that failed or are currently sending/retrying
+      .filter(msg => msg.status === 'sent')
+      // Map to the API format
+      .map(msg => ({
+        role: msg.isUser ? 'user' : 'model',
+        parts: [{ text: msg.text }],
+      }));
+  };
 
-    setMessages(prev => [...prev, newMessage]);
-    
-    // Show typing indicator
-    setIsTyping(true);
-    
-    // Simulate AI response delay (2-3 seconds)
-    setTimeout(() => {
+  const handleSendMessage = async (text: string, isRetry = false, messageToRetry?: ChatMessage) => {
+    const messageText = isRetry && messageToRetry ? messageToRetry.text : text;
+    if (!messageText.trim()) return;
+
+    let userMessage: ChatMessage;
+    let historyForApi: ApiChatMessage[];
+
+    if (isRetry && messageToRetry) {
+      // If retrying, update the status of the existing message
+      userMessage = { ...messageToRetry, status: 'sending' };
+      setMessages(prev =>
+        prev.map(msg => (msg.id === messageToRetry.id ? userMessage : msg))
+      );
+      setRetryingMessageId(messageToRetry.id); // Indicate retry in progress
+
+      // Prepare history *up to* the message being retried
+      const retryIndex = messages.findIndex(msg => msg.id === messageToRetry.id);
+      // Ensure index is valid before slicing
+      historyForApi = retryIndex > -1 ? formatHistoryForApi(messages.slice(0, retryIndex)) : [];
+
+    } else {
+      // If sending a new message
+      setInput(''); // Clear input only for new messages
+      const tempId = Date.now().toString();
+      userMessage = {
+        id: tempId,
+        text: messageText,
+        isUser: true,
+        status: 'sending', // Start as sending
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, userMessage]);
+
+      // Prepare history including all previous messages *before* this new one
+      historyForApi = formatHistoryForApi(messages);
+    }
+
+    // Scroll immediately after adding user message or setting retry status
+    flatListRef.current?.scrollToEnd({ animated: true });
+    setIsTyping(true); // Show AI thinking indicator
+    setError(null); // Clear previous errors
+
+    try {
+      // Call the backend service
+      const aiResponseText = await sendMessageToMist(messageText, historyForApi);
+
+      // Update user message status to 'sent' on success
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === userMessage.id ? { ...msg, status: 'sent' } : msg
+        )
+      );
+
+      // Add the AI response
       const aiResponse: ChatMessage = {
-        id: Date.now().toString(),
-        text: "I understand your query. Let me help you with that. This is a simulated response from the AI assistant.",
+        id: Date.now().toString() + '-ai',
+        text: aiResponseText,
         isUser: false,
         status: 'sent',
         timestamp: Date.now(),
       };
-      
-      setIsTyping(false);
+      // Use functional update to ensure we add to the latest state
       setMessages(prev => [...prev, aiResponse]);
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 2000 + Math.random() * 1000);
 
-    // This would be the actual API implementation
-    /*
-    try {
-      setIsTyping(true);
-      const response = await fetch('/api/messages', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      });
-      
-      if (!response.ok) throw new Error('Failed to send message');
-      
-      const data = await response.json();
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === tempId 
-            ? { ...msg, id: data.id, status: 'sent' }
-            : msg
+    } catch (err: any) {
+      console.error("Error sending/receiving chat message:", err);
+      setError(err.message || 'Failed to get response from Mist.');
+      // Update user message status to 'error' on failure
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === userMessage.id ? { ...msg, status: 'error' } : msg
         )
       );
-      
-      // Add AI response
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        text: data.response,
-        isUser: false,
-        status: 'sent',
-        timestamp: Date.now(),
-      }]);
-      
-    } catch (err) {
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === tempId 
-            ? { ...msg, status: 'error' }
-            : msg
-        )
-      );
-      setError('Failed to send message. Tap to retry.');
     } finally {
-      setIsTyping(false);
+      setIsTyping(false); // Hide AI thinking indicator
+      if (isRetry) {
+        setRetryingMessageId(null); // Clear retry indicator
+      }
+      // Ensure scroll to end after potential state updates and AI response
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
-    */
   };
 
-  const handleRetry = async (messageId: string) => {
+  const handleRetry = (messageId: string) => {
     const messageToRetry = messages.find(msg => msg.id === messageId);
-    if (!messageToRetry) return;
-
-    setRetryingMessageId(messageId);
-    try {
-      await handleSendMessage(messageToRetry.text);
-      setMessages(prev => prev.filter(msg => msg.id !== messageId));
-    } finally {
-      setRetryingMessageId(null);
+    if (messageToRetry && retryingMessageId !== messageId) { // Prevent double retry
+      handleSendMessage('', true, messageToRetry); // Pass retry flag and message
     }
   };
 
   // Render individual message
   const renderMessage = ({ item: message }: { item: ChatMessage }) => {
     const isUser = message.isUser;
-    
+    const messageStyle = isUser ? styles.userMessage : styles.aiMessage;
+    const contentStyle = isUser
+      ? themedStyles.userMessageContent
+      : themedStyles.aiMessageContent;
+    const textStyle = isUser ? themedStyles.userMessageText : themedStyles.aiMessageText;
+
+    const isSending = message.status === 'sending';
+    const isError = message.status === 'error';
+    const isRetrying = isSending && retryingMessageId === message.id;
+
     return (
-      <View style={[
-        styles.messageRow, 
-        isUser ? styles.userMessageRow : styles.aiMessageRow
-      ]}>
-        {/* AI Avatar (only for AI messages) */}
-        {!isUser && (
-          <Avatar.Icon 
-            size={36} 
-            icon="robot" 
-            color={theme.colors.onPrimary} 
-            style={{ backgroundColor: theme.colors.primary, marginRight: 8 }} 
-          />
-        )}
-        
-        <View style={styles.messageContainer}>
-          {/* Message bubble */}
-          <Surface 
-            style={[
-              styles.messageBubble,
-              isUser ? [styles.userMessageBubble, themedStyles.userMessageContent] : [styles.aiMessageBubble, themedStyles.aiMessageContent],
-              message.status === 'error' && [styles.errorMessage, { borderColor: theme.colors.error }]
-            ]}
-            elevation={1}
-          >
-            <Text 
-              style={[
-                styles.messageText,
-                isUser ? themedStyles.userMessageText : themedStyles.aiMessageText
-              ]}
-            >
-              {message.text}
-            </Text>
-            
-            {/* Error and sending indicators */}
-            {message.status === 'error' && (
-              <Text style={[styles.retryText, { color: theme.colors.error }]}>
-                Tap to retry
-              </Text>
-            )}
-            
-            {(message.status === 'sending' || retryingMessageId === message.id) && (
-              <ActivityIndicator size="small" style={styles.sendingIndicator} color={isUser ? theme.colors.onPrimary : theme.colors.primary} />
-            )}
-            
-            {/* Timestamp */}
-            <MessageTime timestamp={message.timestamp} />
-          </Surface>
-        </View>
+      <View style={[styles.messageRow, isUser ? styles.userRow : styles.aiRow]}>
+         {!isUser && <Avatar.Icon size={32} icon="robot-happy-outline" style={styles.avatar} />}
+        <Surface
+          style={[
+            styles.messageBubble,
+            messageStyle,
+            contentStyle,
+            isError && themedStyles.errorMessage,
+            // Dim slightly if sending, more if retrying *another* message
+            isSending && styles.sendingMessage,
+          ]}
+          elevation={1}
+        >
+          <Text style={[styles.messageText, textStyle]}>{message.text}</Text>
+          <View style={styles.messageInfo}>
+             {/* Show spinner only if this specific message is sending/retrying */}
+             {(isSending) && (
+                 <ActivityIndicator
+                   size="small"
+                   color={isUser ? theme.colors.onPrimary : theme.colors.onSurfaceVariant}
+                   style={styles.statusIndicator}
+                 />
+             )}
+             {/* Show retry button only if error and not currently retrying */}
+             {isError && retryingMessageId !== message.id && (
+                <TouchableOpacity onPress={() => handleRetry(message.id)} style={styles.retryButton}>
+                     <MaterialCommunityIcons name="alert-circle-outline" size={16} color={theme.colors.error} style={styles.statusIndicator} />
+                     <Text style={[styles.retryText, themedStyles.retryText]}>Retry</Text>
+                 </TouchableOpacity>
+             )}
+             {/* Show timestamp only if sent successfully */}
+             {message.status === 'sent' && <MessageTime timestamp={message.timestamp} />}
+           </View>
+        </Surface>
+         {isUser && <Avatar.Icon size={32} icon="account-circle-outline" style={styles.avatar} />}
       </View>
     );
   };
@@ -380,13 +565,42 @@ export default function ChatScreen() {
     );
   }, []);
 
+  const renderTypingIndicator = () => {
+    if (!isTyping) return null;
+    return (
+      <View style={[styles.messageRow, styles.aiRow]}>
+        <Avatar.Icon size={32} icon="robot-happy-outline" style={styles.avatar} />
+        <Surface style={[styles.messageBubble, styles.aiMessage, themedStyles.aiMessageContent]} elevation={1}>
+            <TypingIndicator />
+        </Surface>
+      </View>
+    );
+  };
+
+  const renderEmptyComponent = () => {
+    if (isLoading) {
+      return (
+        <View style={styles.emptyContainer}>
+          <MessageSkeleton />
+          <MessageSkeleton isUser />
+        </View>
+      );
+    }
+    // Check if only the initial greeting message exists
+    if (messages.length <= 1 && messages[0]?.id === 'initial-greeting') {
+      return (
+        <View style={styles.emptyContainer}>
+          <MaterialCommunityIcons name="chat-question-outline" size={64} color={theme.colors.onSurfaceVariant} />
+          <Text style={[styles.emptyText, themedStyles.emptyText]}>Ask Mist anything health-related!</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
   return (
     <ErrorBoundary>
-      <KeyboardAvoidingView 
-        style={[styles.container, themedStyles.container, { paddingTop: insets.top }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
+      <View style={[styles.flexOne, themedStyles.container]}>
         <StatusBar style={theme.dark ? "light" : "dark"} />
         
         {/* Header */}
@@ -451,27 +665,7 @@ export default function ChatScreen() {
           renderItem={renderMessage}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.messagesContainer}
-          ListEmptyComponent={() => (
-            isLoading ? (
-              <>
-                <MessageSkeleton />
-                <MessageSkeleton isUser />
-                <MessageSkeleton />
-              </>
-            ) : (
-              <View style={styles.emptyContainer}>
-                <MaterialCommunityIcons 
-                  name="chat-question-outline" 
-                  size={48} 
-                  color={theme.colors.primary} 
-                  style={{ marginBottom: 16 }}
-                />
-                <Text style={[styles.emptyText, themedStyles.emptyText]}>
-                  Ask MystBuddy anything about your health
-                </Text>
-              </View>
-            )
-          )}
+          ListEmptyComponent={renderEmptyComponent}
           refreshControl={
             <RefreshControl
               refreshing={isLoading}
@@ -484,20 +678,11 @@ export default function ChatScreen() {
               flatListRef.current?.scrollToEnd({ animated: true });
             }
           }}
+          style={[styles.flexOne, themedStyles.content]}
+          contentContainerStyle={styles.listContentContainer}
         />
         
-        {/* Typing Indicator */}
-        {isTyping && (
-          <View style={styles.typingIndicatorContainer}>
-            <Avatar.Icon 
-              size={32} 
-              icon="robot" 
-              color={theme.colors.onPrimary}
-              style={{ backgroundColor: theme.colors.primary, marginRight: 8 }} 
-            />
-            <TypingIndicator />
-          </View>
-        )}
+        {renderTypingIndicator()}
         
         {/* Input Area */}
         <Surface style={[styles.bottomContainer, themedStyles.bottomContainer]} elevation={4}>
@@ -521,7 +706,7 @@ export default function ChatScreen() {
                 accessible={true}
                 accessibilityLabel="Message input"
                 accessibilityHint="Type your message here"
-                accessibilityRole="textbox"
+                accessibilityRole="search"
               />
               
               <View style={styles.buttonGroup}>
@@ -565,173 +750,7 @@ export default function ChatScreen() {
         </Surface>
         
         {renderInputAccessory()}
-      </KeyboardAvoidingView>
+      </View>
     </ErrorBoundary>
   );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    height: 60,
-    width: '100%',
-    borderBottomWidth: 1,
-  },
-  headerContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  headerButton: {
-    padding: 8,
-  },
-  headerTitleContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  messagesContainer: {
-    padding: 16,
-    paddingBottom: 80,
-  },
-  messageRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    width: '100%',
-  },
-  userMessageRow: {
-    justifyContent: 'flex-end',
-  },
-  aiMessageRow: {
-    justifyContent: 'flex-start',
-  },
-  messageContainer: {
-    maxWidth: '80%',
-  },
-  messageBubble: {
-    borderRadius: 20,
-    padding: 12,
-    minWidth: 80,
-  },
-  userMessageBubble: {
-    borderBottomRightRadius: 4,
-  },
-  aiMessageBubble: {
-    borderBottomLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  timeText: {
-    fontSize: 10,
-    alignSelf: 'flex-end',
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  errorMessage: {
-    borderWidth: 1,
-  },
-  retryText: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  sendingIndicator: {
-    alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 32,
-    paddingHorizontal: 24,
-  },
-  emptyText: {
-    fontSize: 16,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  typingIndicatorContainer: {
-    position: 'absolute',
-    bottom: 80,
-    left: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  typingContainer: {
-    padding: 10,
-    borderRadius: 16,
-    minWidth: 40,
-    alignItems: 'center',
-  },
-  bottomContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopWidth: 1,
-    paddingBottom: Platform.OS === 'ios' ? 16 : 8,
-  },
-  inputContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 20,
-    maxHeight: INPUT_HEIGHT * 3,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  buttonGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  actionButton: {
-    padding: 8,
-    marginBottom: 4,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sendButtonDisabled: {
-    opacity: 0.7,
-  },
-  inputAccessory: {
-    height: 44,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    paddingHorizontal: 16,
-  },
-  doneButton: {
-    fontSize: 17,
-  },
-}); 
+} 

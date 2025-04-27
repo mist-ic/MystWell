@@ -13,6 +13,7 @@ import scanDocument from 'react-native-document-scanner-plugin';
 import { useAuth } from '@/context/auth';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
+import { supabase } from '@/lib/supabase';
 
 // Define API Base URL (TODO: Move to central config/env)
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
@@ -44,6 +45,9 @@ export default function DocumentScreen() {
   const theme = useTheme();
   // Extract currentProfileId from the session and user data
   const { session, user } = useAuth();
+  const profile = user ? { id: user.id } : null; // Create profile object from user
+  const profileLoading = false; // Since we're using user directly
+  const profileError = null; // Since we're using user directly
   const currentProfileId = user?.id || '';
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,6 +63,7 @@ export default function DocumentScreen() {
   const [newDocumentName, setNewDocumentName] = useState('');
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [addDocumentModalVisible, setAddDocumentModalVisible] = useState(false);
+  const [error, setError] = useState<string | null>(null); // Added error state
 
   // --- Data Fetching --- 
   const fetchDocuments = useCallback(async (checkPolling = false): Promise<DocumentInfo[] | null> => {
@@ -162,6 +167,112 @@ export default function DocumentScreen() {
       }
     };
   }, [session, documents, fetchDocuments]);
+
+  // Setup realtime subscription for document status updates
+  useEffect(() => {
+    // Ensure we have a profile ID and supabase instance before subscribing
+    if (!profile?.id || !supabase) {
+      if (!profileLoading && profileError) {
+        console.error("[Realtime] Cannot subscribe to documents: Profile error or not loaded", profileError);
+      } else if (!profile?.id && !profileLoading) {
+        console.warn("[Realtime] Cannot subscribe to documents: Profile not loaded yet.");
+      }
+      return;
+    }
+
+    // Local polling function for fallback
+    const startLocalPolling = () => {
+      console.log('Starting polling fallback for documents...');
+      // Start a new interval only if one isn't already running
+      if (!pollingIntervalRef.current) {
+        pollingIntervalRef.current = setInterval(() => {
+          console.log('Polling: Checking for document updates...');
+          fetchDocuments();
+        }, 5000); // Check every 5 seconds
+      }
+    };
+
+    console.log(`[Realtime] Setting up document subscription for profile: ${profile.id}`);
+
+    // Define the handler for receiving document updates
+    const handleDocumentUpdate = (payload: any) => {
+      console.log('[Realtime] Received document update:', payload);
+      const updatedDocument = payload.new as DocumentInfo;
+
+      if (!updatedDocument || !updatedDocument.id) {
+        console.warn('[Realtime] Received invalid document update payload:', payload);
+        return;
+      }
+
+      setDocuments(currentDocuments => {
+        const index = currentDocuments.findIndex(doc => doc.id === updatedDocument.id);
+        if (index !== -1) {
+          console.log(`[Realtime] Updating document ${updatedDocument.id} in state.`);
+          // Update existing document
+          const updatedList = [...currentDocuments];
+          updatedList[index] = {
+            ...currentDocuments[index],
+            ...updatedDocument
+          };
+          return updatedList;
+        } else {
+          // If the document isn't in the list (e.g., created after initial fetch)
+          console.log(`[Realtime] Adding new document ${updatedDocument.id} to state.`);
+          return [updatedDocument, ...currentDocuments];
+        }
+      });
+    };
+
+    // Create and manage the subscription channel
+    const channelKey = `documents:profile_id=eq.${profile.id}`;
+    const documentUpdateChannel = supabase
+      .channel(channelKey)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'documents',
+          filter: `profile_id=eq.${profile.id}`
+        },
+        handleDocumentUpdate
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Realtime] Successfully subscribed to ${channelKey}`);
+          
+          // If subscription is working, we can stop polling
+          if (pollingIntervalRef.current) {
+            console.log('Realtime subscription active, stopping polling.');
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error(`[Realtime] Subscription error on ${channelKey}:`, status, err);
+          setError(`Realtime connection issue: ${status}. Falling back to polling.`);
+          
+          // If subscription fails, start polling as fallback
+          if (!pollingIntervalRef.current) {
+            console.log('Realtime subscription failed, starting polling as fallback.');
+            startLocalPolling();
+          }
+        } else if (status === 'CLOSED') {
+          console.log(`[Realtime] Subscription closed for ${channelKey}`);
+        }
+      });
+
+    // Cleanup function
+    return () => {
+      console.log(`[Realtime] Cleaning up document subscription for ${channelKey}`);
+      supabase.removeChannel(documentUpdateChannel)
+        .then(() => {
+          console.log(`[Realtime] Successfully removed document channel ${channelKey}`);
+        })
+        .catch(error => {
+          console.error(`[Realtime] Error removing document channel ${channelKey}:`, error);
+        });
+    };
+  }, [profile?.id, profileLoading, profileError, supabase, fetchDocuments]);
 
   // TODO: Implement real-time subscription for status updates (Alternative to polling)
   // Similar to Recording feature
@@ -366,6 +477,12 @@ export default function DocumentScreen() {
                     throw new Error("User not authenticated");
                  }
 
+                // Create a descriptive name for the scanned document with date
+                const now = new Date();
+                const formattedDate = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+                const scanTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+                const displayName = `Scanned Document ${formattedDate} ${scanTime}`;
+
                 console.log("Requesting upload URL...");
                 const uploadReqResponse = await fetch(`${API_BASE_URL}/documents/upload-request`, {
                   method: 'POST',
@@ -384,7 +501,7 @@ export default function DocumentScreen() {
                     id: documentId,
                     profile_id: currentProfileId,
                     storage_path: storagePath, 
-                    display_name: 'Scanned Document', 
+                    display_name: displayName,
                     status: 'pending_upload',
                     detected_document_type: null,
                     structured_data: null,
@@ -403,7 +520,11 @@ export default function DocumentScreen() {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`,
                   },
-                  body: JSON.stringify({ documentId, storagePath }),
+                  body: JSON.stringify({ 
+                    documentId, 
+                    storagePath,
+                    displayName 
+                  }),
                 });
                 if (!completeResponse.ok) { throw new Error('Failed to notify backend of upload completion'); }
 
@@ -455,7 +576,7 @@ export default function DocumentScreen() {
       }
       
       const fileUri = result.assets[0].uri;
-      const fileName = result.assets[0].name || 'Document';
+      const fileName = result.assets[0].name || 'Untitled Document';
       
       console.log('Selected document:', fileUri);
       
@@ -510,7 +631,11 @@ export default function DocumentScreen() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ documentId, storagePath }),
+        body: JSON.stringify({ 
+          documentId, 
+          storagePath,
+          displayName: fileName
+        }),
       });
       
       if (!completeResponse.ok) { 

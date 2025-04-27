@@ -1,11 +1,13 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_REQUEST_CLIENT } from './document.module'; // Import the request-scoped token
+import { SUPABASE_REQUEST_CLIENT } from './document.constants'; // Import from constants file instead
 import { v4 as uuidv4 } from 'uuid';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { DOCUMENT_PROCESSING_QUEUE } from './constants';
+import { DOCUMENT_PROCESSING_QUEUE } from './document.constants'; // Import from constants file
 import { RenameDocumentDto } from './dto/rename-document.dto';
+import { ProfileService } from '../profile/profile.service';
+import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants'; // Updated import path
 
 // Define an interface for the expected document structure (optional but good practice)
 export interface Document {
@@ -24,28 +26,33 @@ export interface Document {
 @Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
-  private readonly BUCKET_NAME = 'mystwell-user-data'; // Or get from config
+  private readonly BUCKET_NAME = 'documents'; // Change to match the bucket we'll create
 
   constructor(
     @Inject(SUPABASE_REQUEST_CLIENT) private readonly supabase: SupabaseClient,
+    @Inject(SUPABASE_SERVICE_ROLE_CLIENT) private readonly supabaseAdmin: SupabaseClient, // Inject service role client
     @InjectQueue(DOCUMENT_PROCESSING_QUEUE) private readonly documentQueue: Queue,
+    private readonly profileService: ProfileService,
   ) {}
 
   private async getProfileIdForUser(userId: string): Promise<string> {
-    const { data, error } = await this.supabase
-      .from('profiles')
-      .select('id')
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
+    try {
+      // Use ProfileService to get the profile with service role client to bypass RLS
+      const profile = await this.profileService.getProfileByUserId(userId);
+      
+      if (!profile) {
+        this.logger.warn(`No profile found for user ${userId}`);
+        throw new NotFoundException('User profile not found.');
+      }
+      
+      return profile.id;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error; // Re-throw NotFoundException
+      }
       this.logger.error(`Error fetching profile for user ${userId}: ${error.message}`);
       throw new InternalServerErrorException('Could not retrieve user profile.');
     }
-    if (!data) {
-      throw new NotFoundException('User profile not found.');
-    }
-    return data.id;
   }
 
   async getUploadDetails(userId: string): Promise<{ uploadUrl: string; documentId: string; storagePath: string }> {
@@ -58,8 +65,8 @@ export class DocumentService {
 
     this.logger.log(`Creating initial record for document ${documentId} for profile ${profileId}`);
 
-    // Create initial DB record
-    const { error: insertError } = await this.supabase
+    // Create initial DB record using service role client to bypass RLS
+    const { error: insertError } = await this.supabaseAdmin
       .from('documents')
       .insert({
         id: documentId,
@@ -75,7 +82,7 @@ export class DocumentService {
     }
 
     // Generate signed URL for upload (expires in 5 minutes)
-    const { data, error: urlError } = await this.supabase.storage
+    const { data, error: urlError } = await this.supabaseAdmin.storage
       .from(this.BUCKET_NAME)
       .createSignedUploadUrl(storagePath);
 
@@ -91,7 +98,12 @@ export class DocumentService {
     return { uploadUrl, documentId, storagePath };
   }
 
-  async completeUpload(userId: string, documentId: string, storagePath: string): Promise<Document> {
+  async completeUpload(
+    userId: string, 
+    documentId: string, 
+    storagePath: string, 
+    displayName?: string
+  ): Promise<Document> {
     const profileId = await this.getProfileIdForUser(userId);
     const document = await this.getDocumentById(profileId, documentId, true); // Verify ownership internally
 
@@ -116,10 +128,22 @@ export class DocumentService {
       throw new InternalServerErrorException('Failed to queue document for processing.');
     }
 
-    // Update status to queued
-    const { data: updatedDoc, error: updateError } = await this.supabase
+    // Prepare update data
+    const updateData: any = { 
+      status: 'queued', 
+      updated_at: new Date()
+    };
+    
+    // If displayName is provided, update it
+    if (displayName) {
+      updateData.display_name = displayName;
+      this.logger.log(`Setting custom display name for document ${documentId}: "${displayName}"`);
+    }
+
+    // Update status to queued - use admin client to bypass RLS
+    const { data: updatedDoc, error: updateError } = await this.supabaseAdmin
       .from('documents')
-      .update({ status: 'queued', updated_at: new Date() })
+      .update(updateData)
       .eq('id', documentId)
       .eq('profile_id', profileId) // Ensure RLS/ownership again
       .select()
@@ -138,7 +162,8 @@ export class DocumentService {
 
   async getDocuments(userId: string): Promise<Document[]> {
     const profileId = await this.getProfileIdForUser(userId);
-    const { data, error } = await this.supabase
+    // Use admin client to bypass RLS for fetching documents
+    const { data, error } = await this.supabaseAdmin
       .from('documents')
       .select('*')
       .eq('profile_id', profileId)
@@ -146,11 +171,6 @@ export class DocumentService {
 
     if (error) {
       this.logger.error(`Error fetching documents for profile ${profileId}: ${error.message}`);
-      // Check if error is due to RLS/auth failure
-      if (error.code === 'PGRST000' || error.code === '42501') {
-        this.logger.warn('RLS might be blocking document fetch. Verify request-scoped client.');
-        throw new ForbiddenException('Cannot access documents.');
-      }
       throw new InternalServerErrorException('Could not fetch documents.');
     }
 
@@ -159,7 +179,8 @@ export class DocumentService {
 
   // Helper to verify ownership and get a document
   private async getDocumentById(profileId: string, documentId: string, skipOwnershipCheck = false): Promise<Document> {
-    const query = this.supabase
+    // Use admin client to bypass RLS
+    const query = this.supabaseAdmin
       .from('documents')
       .select('*')
       .eq('id', documentId);
@@ -190,12 +211,37 @@ export class DocumentService {
     return this.getDocumentById(profileId, documentId);
   }
 
-  async getDownloadUrl(userId: string, documentId: string): Promise<{ downloadUrl: string }> {
+  async getDownloadUrl(userId: string, documentId: string): Promise<{ downloadUrl: string; mimeType: string | null }> {
     const profileId = await this.getProfileIdForUser(userId);
     const document = await this.getDocumentById(profileId, documentId);
 
+    // Attempt to get file metadata including mime type using the service role client
+    let mimeType: string | null = null;
+    try {
+        const { data: listData, error: listError } = await this.supabaseAdmin.storage
+            .from(this.BUCKET_NAME)
+            .list(document.storage_path.substring(0, document.storage_path.lastIndexOf('/') + 1), { // List directory
+                limit: 1,
+                search: document.storage_path.substring(document.storage_path.lastIndexOf('/') + 1) // Search for exact file name
+            });
+
+        if (listError) {
+            this.logger.warn(`Could not list file to get metadata for ${document.storage_path}: ${listError.message}`);
+        } else if (listData && listData.length > 0 && listData[0].metadata) {
+            mimeType = listData[0].metadata.mimetype ?? null;
+            this.logger.log(`Retrieved mime type for ${document.storage_path}: ${mimeType}`);
+        } else {
+             this.logger.warn(`File not found in storage list or metadata missing for ${document.storage_path}`);
+             // Optionally throw error or proceed without mime type?
+        }
+    } catch (metaError: any) {
+        this.logger.error(`Error fetching metadata for ${document.storage_path}: ${metaError.message}`);
+        // Proceed without mime type
+    }
+
     // Generate signed URL for download (expires in 5 minutes)
-    const { data, error } = await this.supabase.storage
+    // Use the user-scoped client for creating the download URL itself for security
+    const { data, error } = await this.supabase.storage 
       .from(this.BUCKET_NAME)
       .createSignedUrl(document.storage_path, 60 * 5); // 5 minutes expiry
 
@@ -204,7 +250,7 @@ export class DocumentService {
       throw new InternalServerErrorException('Could not generate download link.');
     }
 
-    return { downloadUrl: data.signedUrl };
+    return { downloadUrl: data.signedUrl, mimeType }; // Return mimeType along with URL
   }
 
   async retryProcessing(userId: string, documentId: string): Promise<void> {

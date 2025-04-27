@@ -1,6 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext, Inject, UnauthorizedException, Logger } from '@nestjs/common';
 import { SupabaseClient, User } from '@supabase/supabase-js';
-import { SUPABASE_CLIENT } from '../supabase/supabase.module';
+import { SUPABASE_CLIENT } from '../supabase/supabase.constants';
 import { Request } from 'express';
 
 // Augment Express Request type to include user and profileId

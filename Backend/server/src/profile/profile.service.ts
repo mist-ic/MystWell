@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
+import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants';
 
 // Export the interface
 export interface Profile {

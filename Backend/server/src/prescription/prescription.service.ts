@@ -8,7 +8,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SUPABASE_CLIENT } from '../supabase/supabase.module';
+import { SUPABASE_CLIENT } from '../supabase/supabase.constants';
 import { ProfileService } from '../profile/profile.service';
 import { CreatePrescriptionDto } from './dto/create-prescription.dto';
 import { UpdatePrescriptionDto } from './dto/update-prescription.dto';

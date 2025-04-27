@@ -11,6 +11,9 @@ import { AudioWaveform } from '@/components/AudioWaveform';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '../../context/auth';
 import { deleteRecording } from '../../services/recordingService';
+import { supabase } from '@/lib/supabase';
+import { useUserProfile } from '@/hooks/useUserProfile';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
@@ -259,6 +262,10 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
       }
       
       console.log("Title updated successfully for:", recording.id);
+      // Update local state through the callbacks passed in props
+      setSnackbarMessage(`Renamed recording to "${editedTitle}"`);
+      setSnackbarVisible(true);
+      // Close modal after success
       setIsEditModalVisible(false);
     } catch (error: any) {
       console.error("Error updating title:", error);
@@ -266,7 +273,7 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     } finally {
       setIsUpdating(false);
     }
-  }, [recording.id, recording.title, editedTitle, session]);
+  }, [recording.id, recording.title, editedTitle, session, setSnackbarMessage, setSnackbarVisible]);
 
   const handleRecordingPress = useCallback(() => {
     // Navigate to detail screen
@@ -480,7 +487,7 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
           ) : (
             <View style={[styles.statusIconContainer, { backgroundColor: status.backgroundColor }]}>
               <MaterialCommunityIcons 
-                name={status.icon} 
+                name={status.icon as keyof typeof MaterialCommunityIcons.glyphMap} 
                 size={14} 
                 color={status.color} 
               />
@@ -580,147 +587,79 @@ export default function RecordScreen() {
 
 function RecordScreenContent() {
   const theme = useTheme();
-  const { session } = useAuth(); // Get session for auth token
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
+  const router = useRouter();
+  const { session } = useAuth(); // Keep using session for auth checks
+  const { profile, loading: profileLoading, error: profileError } = useUserProfile(); // Get profile info
 
-  // Input State
-  const [recordingTitle, setRecordingTitle] = useState(''); // State for title input
-
-  // Recording State
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Recording UI State
   const [isRecording, setIsRecording] = useState(false);
-  const [isSaving, setIsSaving] = useState(false); 
   const [recordingTime, setRecordingTime] = useState('00:00');
   const [audioLevel, setAudioLevel] = useState(0);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  
+  // Recording Logic State/Refs
+  const [recordingInstance, setRecordingInstance] = useState<Audio.Recording | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<Audio.RecordingStatus | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  // Store upload info needed by stopRecording
   const activeUploadInfo = useRef<{ recordingId: string; storagePath: string; uploadUrl: string } | null>(null);
-
-  // List State
-  const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [isLoadingList, setIsLoadingList] = useState(true);
-  const [listError, setListError] = useState<string | null>(null);
   
-  // Snackbar State
+  // List State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false); // Re-add state for delete operation
+  
+  // Delete Confirmation State
+  const [isConfirmDialogVisible, setIsConfirmDialogVisible] = useState(false);
+  const [recordingToDelete, setRecordingToDelete] = useState<{ id: string; title: string } | null>(null);
+
+  // Snackbar state
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
-  // Playback State
-  const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
+  // Refs
+  const recordingUpdateChannel = useRef<RealtimeChannel | null>(null);
 
-  // --- Dialog State ---
-  const [confirmDialogVisible, setConfirmDialogVisible] = useState(false);
-  const [recordingToDelete, setRecordingToDelete] = useState<{id: string; title: string} | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  const showDeleteConfirmDialog = useCallback((id: string, title: string) => {
+  // --- Handlers ---
+  const showConfirmDialog = (id: string, title: string) => {
     setRecordingToDelete({ id, title });
-    setConfirmDialogVisible(true);
-  }, []);
+    setIsConfirmDialogVisible(true);
+  };
 
   const hideConfirmDialog = () => {
-    setConfirmDialogVisible(false);
+    setIsConfirmDialogVisible(false);
     setRecordingToDelete(null);
   };
 
-  // --- API Interaction ---
-
-  const fetchRecordings = useCallback(async () => {
-    if (!session) {
-      setIsLoadingList(false);
-      setRecordings([]); 
-      return;
-    }
-    
-    setIsLoadingList(true);
-    setListError(null);
-    console.log("Fetching recordings...");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/recordings`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (!response.ok) {
-        let errorMsg = `HTTP error! status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            errorMsg = errorData.message || errorMsg;
-        } catch (e) { /* ignore json parse error */ }
-        throw new Error(errorMsg);
-      }
-
-      const data: Recording[] = await response.json();
-      // Process recordings data - add categories for UI
-      const processedRecordings = data.map(recording => 
-        categorizeRecording({ ...recording, isPlaying: false })
-      );
-      setRecordings(processedRecordings);
-      console.log("Recordings fetched:", processedRecordings.length);
-    } catch (error: any) {
-      console.error("Error fetching recordings:", error);
-      setListError(error.message || "Failed to fetch recordings.");
-      setRecordings([]); // Clear recordings on error
-    } finally {
-      setIsLoadingList(false);
-    }
-  }, [session]);
-
-  // Fetch recordings on mount or when session changes
-  useEffect(() => {
-    fetchRecordings();
-
-    // Cleanup timer on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      // Stop and unload recording if component unmounts while recording
-      if (recordingRef.current) {
-         console.log("Unloading active recording on unmount...");
-         recordingRef.current.stopAndUnloadAsync().catch(err => console.error("Error unloading recording on unmount:", err));
-         recordingRef.current = null;
-      }
-    };
-  }, [fetchRecordings]); // Re-fetch when fetchRecordings dependency (session) changes
-
-  // Update recording status via API
-  const updateApiRecordingStatus = async (recordingId: string, status: string, errorMsg?: string, duration?: number) => {
-      if (!session) return;
-      console.log(`Updating API status for ${recordingId} to ${status}${duration ? ` with duration ${duration}s` : ''}`);
+  const handleDeleteConfirm = async () => {
+    if (recordingToDelete && session) {
+      setIsDeleting(true); // Set deleting state
       try {
-          const response = await fetch(`${API_BASE_URL}/recordings/${recordingId}/status`, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ status, error: errorMsg, duration }),
-          });
-          if (!response.ok) {
-              let errorDetail = `Status update failed: ${response.status}`;
-              try {
-                  const errorData = await response.json();
-                  errorDetail = errorData.message || errorDetail;
-              } catch (e) {} 
-              throw new Error(errorDetail);
-          }
-          console.log(`Status updated successfully for ${recordingId}`);
-          // Refresh list after status update
-          fetchRecordings(); 
-      } catch (error: any) {
-          console.error(`Failed to update status to ${status} for ${recordingId}:`, error);
-          setSnackbarMessage(`Error updating status: ${error.message}`);
-          setSnackbarVisible(true);
+        await deleteRecording(recordingToDelete.id, session.access_token);
+        setRecordings(prev => prev.filter(rec => rec.id !== recordingToDelete.id));
+        setSnackbarMessage(`Deleted "${recordingToDelete.title}"`);
+        setSnackbarVisible(true);
+      } catch (err: any) {
+        console.error("Error deleting recording:", err);
+        setError(err.message || 'Failed to delete recording');
+      } finally {
+        setIsDeleting(false); // Unset deleting state
+        hideConfirmDialog();
       }
+    } else {
+      setError('Authentication required to delete.');
+      hideConfirmDialog();
+    }
   };
 
-  // --- Recording Logic ---
-
-  // Timer Update
+  const onSnackbarDismiss = () => setSnackbarVisible(false);
   const updateTimer = useCallback(() => {
     if (!startTimeRef.current) return;
     const now = new Date();
@@ -731,285 +670,352 @@ function RecordScreenContent() {
     setRecordingTime(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
   }, []);
 
-  // Start Recording Process
-  const startRecording = async () => {
+  // --- Data Fetching and Updates ---
+  const fetchRecordings = useCallback(async () => {
+    console.log("Fetching recordings...");
     if (!session) {
-      setSnackbarMessage('Please log in to record.');
-      setSnackbarVisible(true);
+      setError("Authentication required.");
+      setIsLoading(false);
       return;
     }
-    if (isRecording || isLoadingList || isSaving) return; // Prevent starting if busy
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/recordings`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch recordings: ${response.statusText}`);
+      }
+      const data: Recording[] = await response.json();
+      console.log(`Recordings fetched: ${data.length}`);
+      setRecordings(data.map(categorizeRecording)); // Apply categorization
+    } catch (err: any) {
+      console.error("Error fetching recordings:", err);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session]);
 
-    setIsLoadingList(true); // Use list loading indicator for setup phase
-    setListError(null);
-    activeUploadInfo.current = null; // Reset previous upload info
-    let createdRecordingId: string | null = null;
+  useEffect(() => {
+    if (session) {
+      fetchRecordings();
+    }
+  }, [session, fetchRecordings]);
+
+  useEffect(() => {
+    // Ensure we have a profile ID before subscribing
+    if (!profile?.id || !supabase) {
+      if (!profileLoading && profileError) {
+        console.error("[Realtime] Cannot subscribe: Profile error or not loaded", profileError);
+        // Optionally show an error to the user about profile loading failure
+      } else if (!profile?.id && !profileLoading) {
+        console.warn("[Realtime] Cannot subscribe: Profile not loaded yet.");
+      }
+      return;
+    }
+
+    console.log(`[Realtime] Setting up subscription for profile: ${profile.id}`);
+
+    // --- Define the handler for receiving updates ---
+    const handleRecordingUpdate = (payload: any) => {
+        console.log('[Realtime] Received update:', payload);
+        const updatedRecording = payload.new as Recording;
+
+        if (!updatedRecording || !updatedRecording.id) {
+            console.warn('[Realtime] Received invalid update payload:', payload);
+            return;
+        }
+
+        setRecordings(currentRecordings => {
+            const index = currentRecordings.findIndex(r => r.id === updatedRecording.id);
+            if (index !== -1) {
+                console.log(`[Realtime] Updating recording ${updatedRecording.id} in state.`);
+                // Update existing recording - Merge to preserve non-DB fields
+                const updatedList = [...currentRecordings];
+                updatedList[index] = { 
+                    ...currentRecordings[index], // Keep existing frontend state like isPlaying
+                    ...categorizeRecording(updatedRecording) // Apply categorization to new data
+                };
+                return updatedList;
+            } else {
+                // If the recording isn't in the list (e.g., created after initial fetch),
+                // Prepend it (or you could trigger a refetch)
+                console.log(`[Realtime] Adding new recording ${updatedRecording.id} to state.`);
+                return [categorizeRecording(updatedRecording), ...currentRecordings];
+            }
+        });
+    };
+
+    // --- Create and manage the subscription channel ---
+    const channelKey = `recordings:profile_id=eq.${profile.id}`;
+    recordingUpdateChannel.current = supabase
+      .channel(channelKey)
+      .on(
+        'postgres_changes',
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'recordings',
+          filter: `profile_id=eq.${profile.id}` 
+        },
+        handleRecordingUpdate
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Realtime] Successfully subscribed to ${channelKey}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error(`[Realtime] Subscription error on ${channelKey}:`, status, err);
+          setError(`Realtime connection issue: ${status}. Please refresh.`);
+        } else if (status === 'CLOSED') {
+            console.log(`[Realtime] Subscription closed for ${channelKey}`);
+        }
+      });
+
+    // --- Cleanup function --- 
+    return () => {
+      if (recordingUpdateChannel.current) {
+        console.log(`[Realtime] Unsubscribing from ${channelKey}`);
+        supabase.removeChannel(recordingUpdateChannel.current)
+          .then(() => {
+            console.log(`[Realtime] Successfully removed channel ${channelKey}`);
+            recordingUpdateChannel.current = null;
+          })
+          .catch(error => {
+            console.error(`[Realtime] Error removing channel ${channelKey}:`, error);
+          });
+      } else {
+          console.log("[Realtime] No active channel to remove on cleanup.");
+      }
+    };
+
+  }, [profile?.id, profileLoading, profileError, supabase]); // Re-run if profile changes
+
+  const updateApiRecordingStatus = async (recordingId: string, status: string, errorMsg?: string, duration?: number) => {
+    if (!session) return;
+    console.log(`Updating API status for ${recordingId} to ${status}${duration ? ` with duration ${duration}s` : ''}`);
+    try {
+        const response = await fetch(`${API_BASE_URL}/recordings/${recordingId}/status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ status, error: errorMsg, duration }),
+        });
+        if (!response.ok) {
+            let errorDetail = `Status update failed: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.message || errorDetail;
+            } catch (e) {} 
+            throw new Error(errorDetail);
+        }
+        console.log(`Status updated successfully for ${recordingId}`);
+        // Refresh list after status update
+        fetchRecordings(); 
+    } catch (error: any) {
+        console.error(`Failed to update status to ${status} for ${recordingId}:`, error);
+        setSnackbarMessage(`Error updating status: ${error.message}`);
+        setSnackbarVisible(true);
+    }
+  };
+
+  // --- Recording Logic ---
+  const startRecording = async () => {
+    if (!session) {
+      setError("Authentication required.");
+      return;
+    }
+    if (isRecording || isLoading || isUploading) return;
+
+    setIsLoading(true);
+    setError(null);
+    activeUploadInfo.current = null; // Reset active upload info
 
     try {
-      // 1. Request Mic Permissions (Platform Specific)
+      // 1. Request microphone permissions
       console.log('Requesting permissions...');
-      let permissionGranted = false;
-      if (Platform.OS === 'web') {
-          try {
-              // Use standard Web API for permissions
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              // We don't need the stream itself for Expo AV, just need the permission grant.
-              // Important: Stop the tracks immediately to release the microphone indicator if Expo AV doesn't handle it.
-              stream.getTracks().forEach(track => track.stop());
-              permissionGranted = true;
-              console.log('Web microphone permission granted.');
-          } catch (err) {
-              console.error("Web microphone permission denied:", err);
-              throw new Error('Microphone permission is required');
-          }
-      } else {
-          // Use Expo API for native
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-              throw new Error('Microphone permission is required');
-          }
-          permissionGranted = true;
-           console.log('Native microphone permission granted.');
+      const permissionResponse = await Audio.requestPermissionsAsync();
+      if (!permissionResponse.granted) {
+        throw new Error('Microphone permissions were denied.');
       }
+      console.log('Web microphone permission granted.');
 
-      if (!permissionGranted) {
-        // This case should theoretically not be reached due to throws above, but belts and suspenders
-        throw new Error('Microphone permission was not granted.');
-      }
-
-      // 2. Get Upload URL and create metadata entry
-      console.log("Requesting upload URL...");
-      // Use state for title, provide a default if empty
-      const titleToSend = searchQuery.trim() || recordingTitle.trim() || `Recording - ${new Date().toLocaleString()}`;
-
-      // Define fetch options
-      const fetchOptions = {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({}), // Ensure body is empty object
+      // 2. Get upload URL from backend
+      console.log('Requesting upload URL...');
+      const uploadUrlOptions = { 
+        method: 'POST', 
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json' // Important, even for empty body sometimes
+        },
+        body: JSON.stringify({}) // Send empty JSON object
       };
-
-      // Add debug log
-      console.log('DEBUG: Fetching upload URL with options:', fetchOptions);
-
-      // Make the fetch call
-      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, fetchOptions);
-
+      console.log('DEBUG: Fetching upload URL with options:', uploadUrlOptions);
+      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, uploadUrlOptions);
+      
       if (!uploadResponse.ok) {
-          let errorMsg = 'Failed to prepare recording session';
-          try {
-              const errorData = await uploadResponse.json();
-              errorMsg = errorData.message || errorMsg;
-          } catch(e) {}
-          throw new Error(errorMsg);
+        const errorText = await uploadResponse.text();
+        throw new Error(`Failed to get upload URL: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
       }
 
       const uploadData = await uploadResponse.json();
-      activeUploadInfo.current = uploadData;
-      createdRecordingId = uploadData.recordingId; // Keep track in case of later errors
-      console.log("Upload URL received for recording ID:", createdRecordingId);
+      activeUploadInfo.current = uploadData; // <-- Store the upload info
+      console.log("Upload URL received for recording ID:", uploadData.recordingId);
 
       // 3. Configure Audio Mode (If needed, might be redundant after web getUserMedia)
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
+      // Consider if this is necessary for web platform
+      if (Platform.OS !== 'web') { 
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+      }
 
-      // 4. Start Expo Audio Recording
+      // 4. Create and start Expo recording instance
       console.log('Starting Expo AV recording...');
       // Ensure any previous recording instance is unloaded
-      if (recordingRef.current) {
-          await recordingRef.current.stopAndUnloadAsync();
-          recordingRef.current = null;
+      if (recordingInstance) {
+          await recordingInstance.stopAndUnloadAsync();
+          // No need to set to null here, setRecordingInstance will overwrite
       }
       const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        Audio.RecordingOptionsPresets.HIGH_QUALITY, // Or use specific options if needed
         (status) => {
-           if (status.isRecording && status.metering) {
-             const normalizedLevel = Math.max(0, 1 + status.metering / 50);
-             setAudioLevel(normalizedLevel);
+          // Update audio level for visualization (optional)
+          if (status.isRecording) {
+            setAudioLevel(status.metering ?? 0); // Use metering if available
+            setRecordingStatus(status);
           }
         },
-        100
+        100 // Update interval in ms
       );
-      recordingRef.current = recording;
+      setRecordingInstance(recording); // Set the new instance
 
       // 5. Start UI Timer
       startTimeRef.current = new Date();
-      if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(updateTimer, 1000);
-
       setIsRecording(true);
       console.log('Recording started.');
 
     } catch (error: any) {
       console.error('Error starting recording:', error);
-      setListError(error.message || 'Failed to start recording.');
-      // If metadata record was created but something failed after, mark it as failed
-      if (createdRecordingId) {
-          await updateApiRecordingStatus(createdRecordingId, 'start_failed', error.message);
+      setError(error.message || 'Failed to start recording.');
+      if (activeUploadInfo.current?.recordingId) { // Use stored ID if available
+          await updateApiRecordingStatus(activeUploadInfo.current.recordingId, 'failed', `Start failed: ${error.message}`);
       }
       activeUploadInfo.current = null;
     } finally {
-        setIsLoadingList(false);
+      setIsLoading(false);
     }
   };
 
-  // Stop Recording Process
   const stopRecording = async () => {
-    if (!recordingRef.current || !activeUploadInfo.current || isSaving) return;
+    // Use the info stored in the ref
+    if (!recordingInstance || !activeUploadInfo.current || isUploading) return;
     
+    const { recordingId, uploadUrl, storagePath } = activeUploadInfo.current;
+    console.log(`Stopping recording ${recordingId}...`);
+
     setIsRecording(false);
-    setIsSaving(true); 
+    setIsUploading(true); 
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
-    setAudioLevel(0); 
+    startTimeRef.current = null;
+    setAudioLevel(0);
 
-    const { recordingId, uploadUrl } = activeUploadInfo.current;
     let recordingUri: string | null = null;
     let durationSeconds: number = 0;
-    
-    console.log(`Stopping recording ${recordingId}...`);
 
     try {
       // Stop recording and get URI/Status
-      await recordingRef.current.stopAndUnloadAsync();
-      recordingUri = recordingRef.current.getURI();
-      const status = await recordingRef.current.getStatusAsync();
+      await recordingInstance.stopAndUnloadAsync();
+      recordingUri = recordingInstance.getURI();
+      const status = await recordingInstance.getStatusAsync();
       durationSeconds = Math.round((status.durationMillis || 0) / 1000);
-      recordingRef.current = null;
+      setRecordingInstance(null); 
 
       if (!recordingUri) {
-        throw new Error('Recording URI is missing after stop.');
+        throw new Error('Failed to get recording URI after stopping.');
       }
-
       console.log(`Recording stopped. URI: ${recordingUri}, Duration: ${durationSeconds}s`);
-      
-      // Don't need a separate PUT call now
-      /*
-      // Update final duration in metadata *before* upload attempt
-      // Note: This PUT endpoint doesn't exist yet, add it or combine with status update
-      // await fetch(`${API_BASE_URL}/recordings/${recordingId}`, { 
-      //    method: 'PUT', body: JSON.stringify({ duration: durationSeconds }) ... });
-      */
 
-      console.log(`Uploading to signed URL...`);
-      
-      // Fetch the recording file as a blob
-      const fileResponse = await fetch(recordingUri);
-      const blob = await fileResponse.blob();
+      // Fetch the blob from the URI
+      const blobResponse = await fetch(recordingUri);
+      const blob = await blobResponse.blob();
 
-      // Upload the blob to the signed URL
-      const uploadResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          headers: {
-              'Content-Type': blob.type || 'audio/m4a', 
-          },
-          body: blob,
+      // Upload the blob to the signed URL (use the stored URL)
+      console.log('Uploading to signed URL...');
+      setUploadProgress(0);
+      const uploadResponseS3 = await fetch(uploadUrl, { // <-- Use stored uploadUrl
+        method: 'PUT',
+        headers: { 'Content-Type': blob.type || 'audio/m4a' },
+        body: blob,
       });
 
-      if (!uploadResponse.ok) {
-          let errorDetail = `Upload failed: ${uploadResponse.status}`;
-          try {
-              const errorXml = await uploadResponse.text();
-              console.error("Storage Upload Error Response:", errorXml);
-              const messageMatch = errorXml.match(/<Message>(.*?)<\/Message>/);
-              if (messageMatch && messageMatch[1]) {
-                  errorDetail = messageMatch[1];
-              }
-          } catch (parseError) { /* Ignore parsing error */ }
-          throw new Error(errorDetail);
+      if (!uploadResponseS3.ok) {
+        const errorText = await uploadResponseS3.text();
+        throw new Error(`Upload failed: ${uploadResponseS3.status} ${uploadResponseS3.statusText} - ${errorText}`);
       }
-
       console.log(`Upload successful for ${recordingId}. Updating status...`);
-      // Update status to 'uploaded' AND include the final duration
-      await updateApiRecordingStatus(recordingId, 'uploaded', undefined, durationSeconds); 
+      setUploadProgress(100);
 
-      setSnackbarMessage('Recording saved successfully!');
-      // Clear the search query after successful recording
-      setSearchQuery('');
-      setRecordingTitle('');
+      // Update backend status to 'uploaded'
+      await updateApiRecordingStatus(recordingId, 'uploaded', undefined, durationSeconds);
 
     } catch (error: any) {
-      console.error('Error stopping or uploading recording:', error);
-      setSnackbarMessage(`Error saving recording: ${error.message}`);
-      // Update status to 'upload_failed' via backend
-      // Optionally send duration here too, though maybe less critical on failure
-      await updateApiRecordingStatus(recordingId, 'upload_failed', error.message, durationSeconds); 
+      console.error(`Error stopping/uploading recording ${recordingId}:`, error);
+      setError(error.message || 'Failed to stop or upload recording.');
+      await updateApiRecordingStatus(recordingId, 'failed', `Stop/Upload failed: ${error.message}`, durationSeconds);
     } finally {
-      setIsSaving(false);
-      activeUploadInfo.current = null; 
-      setRecordingTime('00:00'); 
-      // List refresh is handled by updateApiRecordingStatus
-      setSnackbarVisible(true);
+      setIsUploading(false);
+      activeUploadInfo.current = null; // Clear the ref
+      setRecordingTime('00:00');
+      setRecordingInstance(null);
+      setUploadProgress(0);
     }
   };
 
-  // Cancel Recording
   const cancelRecording = async () => {
-    if (isSaving) return; // Don't cancel if already saving
-    
+    if (isUploading) return;
+    const recordingIdToCancel = activeUploadInfo.current?.recordingId;
+    console.log(`Cancelling recording process ${recordingIdToCancel ? `for ${recordingIdToCancel}`: ''}...`);
+
     setIsRecording(false);
-    setAudioLevel(0);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+    startTimeRef.current = null;
     setRecordingTime('00:00');
+    setAudioLevel(0);
 
     // Stop and unload the Expo recording instance first
-    if (recordingRef.current) {
+    if (recordingInstance) {
       console.log('Cancelling Expo recording instance...');
       try {
-      await recordingRef.current.stopAndUnloadAsync();
+        await recordingInstance.stopAndUnloadAsync();
       } catch (error) {
         console.error("Error stopping Expo recording on cancel:", error);
       }
-      recordingRef.current = null;
+      setRecordingInstance(null);
     }
 
-    // If we had started the backend process, mark the record as cancelled
-    if (activeUploadInfo.current) {
-      const cancelledId = activeUploadInfo.current.recordingId;
-      console.log("Marking cancelled recording as cancelled in backend:", cancelledId);
+    // If we had started the backend process (got an ID), mark the record as cancelled
+    if (recordingIdToCancel) {
+      console.log("Marking cancelled recording as cancelled in backend:", recordingIdToCancel);
       // Update status via API
-      await updateApiRecordingStatus(cancelledId, 'cancelled'); 
+      await updateApiRecordingStatus(recordingIdToCancel, 'cancelled'); 
     }
     
-    activeUploadInfo.current = null; // Clear upload info
+    activeUploadInfo.current = null; // Clear the ref
     setSnackbarMessage('Recording cancelled.');
     setSnackbarVisible(true);
   };
 
-  // --- UI Rendering ---
-
-  // Execute Delete from Dialog
-  const executeDelete = useCallback(async () => {
-    if (!recordingToDelete || !session?.access_token) {
-      hideConfirmDialog();
-      return;
-    }
-    
-    const { id: recordingId } = recordingToDelete;
-    hideConfirmDialog(); 
-    setIsDeleting(true); 
-    
-    try {
-      await deleteRecording(recordingId, session.access_token);
-      setSnackbarMessage('Recording deleted successfully.');
-      setSnackbarVisible(true);
-      fetchRecordings(); 
-    } catch (error: any) {
-      console.error(`Error deleting recording ${recordingId}:`, error);
-      setSnackbarMessage(error.message || "Failed to delete recording.");
-      setSnackbarVisible(true);
-    } finally {
-      setIsDeleting(false); 
-    }
-  }, [recordingToDelete, session, fetchRecordings]);
-
-  // Filter recordings based on search and active tab
+  // --- UI Filtering and Rendering ---
   const filteredRecordings = useMemo(() => {
     // First filter by search query
     let filtered = recordings;
@@ -1022,10 +1028,10 @@ function RecordScreenContent() {
     }
     
     // Then filter by active tab
-    if (activeTab !== 'all') {
-      const category = activeTab === 'appointments' 
+    if (activeFilter !== 'all') {
+      const category = activeFilter === 'appointments' 
         ? 'Appointment' 
-        : activeTab === 'reminders' 
+        : activeFilter === 'reminders' 
         ? 'Reminder' 
         : 'Other';
       
@@ -1033,29 +1039,18 @@ function RecordScreenContent() {
     }
     
     return filtered;
-  }, [recordings, searchQuery, activeTab]);
+  }, [recordings, searchQuery, activeFilter]);
 
-  // Group recordings by date for section list
-  const groupedRecordings = useMemo(() => {
+  const groupedAndFilteredRecordings = useMemo(() => {
     return groupRecordingsByDate(filteredRecordings);
   }, [filteredRecordings]);
 
-  // Count records by category for tab badges
-  const counts = useMemo(() => {
-    const all = recordings.length;
-    const appointments = recordings.filter(r => r.category === 'Appointment').length;
-    const reminders = recordings.filter(r => r.category === 'Reminder').length;
-    const others = recordings.filter(r => r.category === 'Other').length;
-    
-    return { all, appointments, reminders, others };
-  }, [recordings]);
-
-  // Empty state for specific category
+  // --- Empty List Components ---
   const CategoryEmptyComponent = () => {
     let message = '';
     let icon: keyof typeof MaterialCommunityIcons.glyphMap = 'text-box-outline'; 
     
-    switch (activeTab) {
+    switch (activeFilter) {
       case 'appointments':
         message = 'No appointments yet';
         icon = 'calendar';
@@ -1082,15 +1077,14 @@ function RecordScreenContent() {
     );
   };
 
-  // Combined empty state component
   const ListEmptyComponent = () => {
     return (
       <View style={styles.emptyContainer}>
-        {isLoadingList ? (
+        {isLoading ? (
           <ActivityIndicator size="large" color="#4F46E5"/>
-        ) : listError ? (
+        ) : error ? (
           <>
-            <Text style={styles.emptyText}>Error: {listError}</Text>
+            <Text style={styles.emptyText}>Error: {error}</Text>
             <Button mode="outlined" onPress={fetchRecordings} style={{ marginTop: 12 }}>Retry</Button>
           </>
         ) : !session ? (
@@ -1108,9 +1102,23 @@ function RecordScreenContent() {
     );
   };
 
-  // State for search input focus
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  
+  // --- Render Functions ---
+  const renderRecordingItem: ListRenderItem<Recording> = useCallback(({ item }) => (
+    <RecordingItem
+      recording={item}
+      currentlyPlayingId={currentlyPlayingId}
+      setCurrentlyPlayingId={setCurrentlyPlayingId}
+      showDeleteConfirmDialog={showConfirmDialog}
+      setSnackbarMessage={setSnackbarMessage}
+      setSnackbarVisible={setSnackbarVisible}
+    />
+  ), [currentlyPlayingId, showConfirmDialog, setSnackbarMessage, setSnackbarVisible]);
+
+  const renderSectionHeader = ({ section: { title } }: { section: RecordingSection }) => (
+    <SectionHeader title={title} />
+  );
+
+  // --- Main Render ---
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar style={theme.dark ? "light" : "dark"} />
@@ -1129,8 +1137,6 @@ function RecordScreenContent() {
               style={styles.searchInput}
               outlineStyle={{ borderRadius: 8 }}
               disabled={isRecording}
-              onFocus={() => setIsSearchFocused(true)}
-              onBlur={() => setIsSearchFocused(false)}
               right={
                 searchQuery ? 
                 <TextInput.Icon icon="close" onPress={() => setSearchQuery('')} /> : 
@@ -1153,13 +1159,13 @@ function RecordScreenContent() {
           >
             <View style={styles.tabContainer}>
               <SegmentedButtons
-                value={activeTab}
-                onValueChange={setActiveTab}
+                value={activeFilter}
+                onValueChange={setActiveFilter}
                 buttons={[
-                  { value: 'all', label: `All (${counts.all})` },
-                  { value: 'appointments', label: `Appointments (${counts.appointments})` },
-                  { value: 'reminders', label: `Reminders (${counts.reminders})` },
-                  { value: 'others', label: `Others (${counts.others})` }
+                  { value: 'all', label: `All (${recordings.length})` },
+                  { value: 'appointments', label: `Appointments (${recordings.filter(r => r.category === 'Appointment').length})` },
+                  { value: 'reminders', label: `Reminders (${recordings.filter(r => r.category === 'Reminder').length})` },
+                  { value: 'others', label: `Others (${recordings.filter(r => r.category === 'Other').length})` }
                 ]}
                 style={styles.segmentButtons}
               />
@@ -1169,25 +1175,14 @@ function RecordScreenContent() {
         
         {/* Recordings List */}
         <SectionList
-          sections={groupedRecordings}
+          sections={groupedAndFilteredRecordings}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <RecordingItem
-              recording={item}
-              currentlyPlayingId={currentlyPlayingId}
-              setCurrentlyPlayingId={setCurrentlyPlayingId}
-              showDeleteConfirmDialog={showDeleteConfirmDialog}
-              setSnackbarMessage={setSnackbarMessage}
-              setSnackbarVisible={setSnackbarVisible}
-            />
-          )}
-          renderSectionHeader={({ section: { title } }) => (
-            <SectionHeader title={title} />
-          )}
+          renderItem={renderRecordingItem}
+          renderSectionHeader={renderSectionHeader}
           contentContainerStyle={styles.listContentContainer}
           ListEmptyComponent={ListEmptyComponent}
-          refreshing={isLoadingList && recordings.length > 0}
-          onRefresh={isDeleting ? undefined : fetchRecordings}
+          refreshing={isLoading && recordings.length > 0}
+          onRefresh={fetchRecordings}
           stickySectionHeadersEnabled={true}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -1206,16 +1201,16 @@ function RecordScreenContent() {
               <TouchableOpacity 
                 style={[styles.cancelButton, { borderColor: theme.colors.error }]} 
                 onPress={cancelRecording} 
-                disabled={isSaving}
+                disabled={isUploading}
               >
                 <MaterialCommunityIcons name="close" size={24} color={theme.colors.error} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.stopButton, { backgroundColor: theme.colors.error }]}
                 onPress={stopRecording}
-                disabled={isSaving}
+                disabled={isUploading}
               >
-                {isSaving ? (
+                {isUploading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <MaterialCommunityIcons name="stop" size={32} color="#fff" />
@@ -1230,7 +1225,7 @@ function RecordScreenContent() {
           <TouchableOpacity
             style={styles.fabButton}
             onPress={startRecording}
-            disabled={isLoadingList || isSaving || !session}
+            disabled={isLoading || isUploading || !session}
           >
             <MaterialCommunityIcons name="microphone" size={24} color="#FFFFFF" />
           </TouchableOpacity>
@@ -1239,7 +1234,7 @@ function RecordScreenContent() {
       
       {/* Delete Confirmation Dialog */}
       <Portal>
-        <Dialog visible={confirmDialogVisible} onDismiss={hideConfirmDialog}>
+        <Dialog visible={isConfirmDialogVisible} onDismiss={hideConfirmDialog}>
           <Dialog.Icon icon="alert-circle-outline" color="#EF4444" size={36} />
           <Dialog.Title style={styles.dialogTitle}>Confirm Deletion</Dialog.Title>
           <Dialog.Content>
@@ -1251,9 +1246,9 @@ function RecordScreenContent() {
           <Dialog.Actions>
             <Button onPress={hideConfirmDialog} disabled={isDeleting}>Cancel</Button>
             <Button 
-              onPress={executeDelete} 
+              onPress={handleDeleteConfirm} 
               textColor="#EF4444" 
-              disabled={isDeleting} 
+              disabled={isDeleting}
               loading={isDeleting}
             >
               Delete
@@ -1265,7 +1260,7 @@ function RecordScreenContent() {
       {/* Snackbar */}
       <Snackbar
         visible={snackbarVisible}
-        onDismiss={() => setSnackbarVisible(false)}
+        onDismiss={onSnackbarDismiss}
         duration={3000}
         style={styles.snackbar}
       >

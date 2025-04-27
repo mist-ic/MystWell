@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID, IsOptional, MaxLength } from 'class-validator';
 
 export class UploadCompleteDto {
   @IsNotEmpty()
@@ -8,4 +8,9 @@ export class UploadCompleteDto {
   @IsNotEmpty()
   @IsUUID()
   documentId: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  displayName?: string;
 } 

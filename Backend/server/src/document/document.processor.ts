@@ -1,8 +1,8 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { DOCUMENT_PROCESSING_QUEUE } from './constants';
+import { DOCUMENT_PROCESSING_QUEUE } from './document.constants';
 import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
-import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module'; // Correct path
+import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.constants'; // Update import path
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Schema, SchemaType } from '@google/generative-ai';
@@ -42,7 +42,7 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       // 2. Download image (use supabaseAdmin)
       this.logger.log(`Downloading image from ${storagePath}`);
       // Ensure bucket name is correct - let's assume it's 'mystwell-user-data' based on service
-      const BUCKET_NAME = 'mystwell-user-data';
+      const BUCKET_NAME = 'documents';
       const { data: blob, error: downloadError } = await this.supabaseAdmin.storage
           .from(BUCKET_NAME)
           .download(storagePath);
@@ -59,10 +59,17 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       this.logger.log(`Image converted to base64 (mime-type: ${mimeType}).`);
 
       // --- Validate Mime Type --- 
-      const supportedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif'];
+      const supportedMimeTypes = [
+        'image/png', 
+        'image/jpeg', 
+        'image/webp', 
+        'image/heic', 
+        'image/heif',
+        'application/pdf' // Add PDF support
+      ];
       if (!supportedMimeTypes.includes(mimeType)){
           this.logger.warn(`Unsupported mime type ${mimeType} for document ${documentId}. Skipping Gemini.`);
-          throw new Error(`Unsupported image type: ${mimeType}`);
+          throw new Error(`Unsupported file type: ${mimeType}`); // Changed error message slightly
       }
 
       // 4. Define Schema (more strictly typed)
@@ -121,19 +128,6 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       // 5. Call Gemini API
       this.logger.log(`Calling Gemini API (model: gemini-2.5-flash-preview-04-17) for document ${documentId}...`);
       
-      // Define the tool (function declaration) for Gemini
-      const tools = [
-        {
-          functionDeclarations: [
-            {
-              name: "extract_document_data",
-              description: "Extracts structured data from the medical document based on the provided schema.",
-              parameters: schema, // The JSON schema defined earlier
-            },
-          ],
-        },
-      ];
-
       const model = this.googleAiClient.getGenerativeModel({
           model: "gemini-2.5-flash-preview-04-17",
           safetySettings: [
@@ -142,43 +136,44 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
                 { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
             ],
-          generationConfig: { responseMimeType: "application/json" }, // Ensure JSON output if possible, though function calling is preferred
-          tools: tools, // Pass the defined tools
-          // Force function calling if needed (might vary by SDK version/model)
-          // toolConfig: { functionCallingConfig: { mode: "ANY" /* or REQUIRED */ } } 
+          generationConfig: { responseMimeType: "application/json" },
       });
 
-      const prompt = "Analyze this medical document image and extract the key information using the provided 'extract_document_data' function.";
-      const imagePart = { inlineData: { data: base64Image, mimeType: mimeType } };
+      const prompt = `Analyze the attached medical document (image or PDF) and extract the key information. \nRespond ONLY with a valid JSON object adhering to the following structure. Do NOT include any other text or formatting like backticks (\`\`\").\n\nJSON Structure:\n${JSON.stringify(schema, null, 2)}\n\nDocument Analysis:`;
+      const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
       
-      // Simpler parts structure
-      const parts = [ { text: prompt }, imagePart ];
+      const parts = [ { text: prompt }, filePart ];
 
       let extractedJson: any;
       try {
-          const result = await model.generateContent({ contents: [{ role: "user", parts }] }); // Correct structure
+          const result = await model.generateContent({ contents: [{ role: "user", parts }] });
           const response = result.response;
-          const functionCalls = response?.functionCalls;
+          const responseText = response?.text();
 
-          // Check for function call in response
-          if (functionCalls && functionCalls.length > 0) {
-              const functionCall = functionCalls[0];
-              if (functionCall.name === "extract_document_data") {
-                  extractedJson = functionCall.args; // Arguments should match the schema
-                   this.logger.log('Gemini returned structured data via function call.');
-              } else {
-                  throw new Error(`Unexpected function call returned: ${functionCall.name}`);
-              }
-          } else {
-              // Fallback or error if no function call is present
-              const responseText = response?.text(); // Get text response if no function call
-              this.logger.warn(`Gemini did not return a function call. Response text: ${responseText}`);
-               throw new Error('Gemini did not return the expected function call to extract data.');
+          if (!responseText) {
+            this.logger.error(`Gemini returned an empty response for document ${documentId}.`);
+            throw new Error('Gemini returned an empty response.');
+          }
+
+          this.logger.log(`Received raw response text from Gemini: ${responseText}`);
+
+          try {
+            extractedJson = JSON.parse(responseText);
+            this.logger.log('Successfully parsed Gemini response text as JSON.');
+          } catch (parseError) {
+            this.logger.error(`Failed to parse Gemini response text as JSON for document ${documentId}. Text: ${responseText}`, parseError.stack);
+            const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+            try {
+              extractedJson = JSON.parse(cleanedText);
+              this.logger.log('Successfully parsed cleaned Gemini response text as JSON.');
+            } catch (cleanedParseError) {
+              this.logger.error(`Failed to parse even cleaned Gemini response text as JSON for document ${documentId}. Cleaned Text: ${cleanedText}`, cleanedParseError.stack);
+              throw new Error('Gemini response was not valid JSON, even after cleaning.');
+            }
           }
 
       } catch (apiError) {
           this.logger.error(`Gemini API call failed for document ${documentId}: ${apiError.message}`, apiError.stack);
-          // Check if error response provides more details (e.g., safety blocks)
           if (apiError.response && apiError.response.promptFeedback) {
               this.logger.error(`Prompt Feedback: ${JSON.stringify(apiError.response.promptFeedback)}`);
               throw new Error(`Gemini API error: Blocked due to ${apiError.response.promptFeedback.blockReason}`);
@@ -188,48 +183,40 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
 
       this.logger.log(`Gemini call successful for document ${documentId}.`);
 
-      // 6. Validate Response (Basic check)
       if (!extractedJson || typeof extractedJson !== 'object' || !extractedJson.detected_document_type) {
         this.logger.error(`Invalid or incomplete JSON structure received from Gemini for ${documentId}: ${JSON.stringify(extractedJson)}`);
         throw new Error('Invalid or incomplete JSON structure received from Gemini');
       }
 
-      // 7. Store Results (use supabaseAdmin)
       await this.updateDocumentStatus(documentId, 'processed', extractedJson);
       this.logger.log(`Job ${job.id} completed successfully for document ${documentId}.`);
       return { success: true };
 
     } catch (error) {
       this.logger.error(`Job ${job.id} failed for document ${documentId}: ${error.message}`, error.stack);
-      // Update status to failed (use supabaseAdmin)
       await this.updateDocumentStatus(documentId, 'processing_failed', null, error.message);
-      // Re-throw the error so BullMQ knows the job failed
       throw error;
     }
   }
 
-  // Helper function to update document status
   private async updateDocumentStatus(documentId: string, status: string, structuredData?: any, errorMessage?: string) {
       const updateData: any = { status, updated_at: new Date() };
       if (status === 'processed' && structuredData) {
           updateData.structured_data = structuredData;
-          // Ensure detected_document_type exists before assigning
           updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
-          updateData.error_message = null; // Clear previous errors
+          updateData.error_message = null;
       }
       if (status === 'processing_failed') {
-          updateData.error_message = errorMessage?.substring(0, 500); // Limit error message length
+          updateData.error_message = errorMessage?.substring(0, 500);
       }
-      // Ensure bucket name is correct
-      const BUCKET_NAME = 'mystwell-user-data';
+      const BUCKET_NAME = 'documents';
       const { error } = await this.supabaseAdmin
-          .from('documents') // Table name
+          .from('documents')
           .update(updateData)
           .eq('id', documentId);
 
       if (error) {
           this.logger.error(`Failed to update status for document ${documentId} to ${status}: ${error.message}`);
-          // Decide if this should throw or just log
       }
   }
 } 

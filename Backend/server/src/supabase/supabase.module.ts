@@ -1,10 +1,8 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, forwardRef } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-// Injection tokens
-export const SUPABASE_CLIENT = 'SUPABASE_CLIENT'; // Standard client (Anon Key)
-export const SUPABASE_SERVICE_ROLE_CLIENT = 'SUPABASE_SERVICE_ROLE_CLIENT'; // Admin client (Service Role Key)
+import { SupabaseService } from './supabase.service';
+import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from './supabase.constants';
 
 @Global() // Make Supabase client available globally
 @Module({
@@ -55,8 +53,14 @@ export const SUPABASE_SERVICE_ROLE_CLIENT = 'SUPABASE_SERVICE_ROLE_CLIENT'; // A
         },
         inject: [ConfigService],
     },
+    // Add SupabaseService as a provider
+    SupabaseService,
   ],
-  // Export only client providers
-  exports: [SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT],
+  // Export clients AND the service
+  exports: [
+    SUPABASE_CLIENT,
+    SUPABASE_SERVICE_ROLE_CLIENT,
+    SupabaseService,
+  ],
 })
 export class SupabaseModule {} 
