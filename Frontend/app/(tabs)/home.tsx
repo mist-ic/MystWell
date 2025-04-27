@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react';
+import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusItem } from '@/components/ui/StatusItem';
 import { ReminderItem, ReminderType } from '@/components/ui/ReminderItem';
 import { QuickActionCard } from '@/components/ui/Card/QuickActionCard';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 
@@ -59,6 +59,7 @@ const initialReminders: Reminder[] = [
 export default function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const pathname = usePathname(); // Get current route path
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders);
   
   // --- State for Modification Modal ---
@@ -163,6 +164,9 @@ export default function HomeScreen() {
   // Estimate height for ~3 items + padding/gaps
   // Adjusted height for 3 items
   const reminderContainerHeight = 240; 
+
+  // Ensure this FAB only appears on the home tab
+  const isHomeTab = pathname === '/(tabs)/home';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -338,7 +342,7 @@ export default function HomeScreen() {
       <Portal>
         <FAB.Group
           open={fabOpen}
-          visible={true} 
+          visible={isHomeTab} // Only visible on home tab
           icon={fabOpen ? 'close' : 'plus'}
           actions={[
             {
