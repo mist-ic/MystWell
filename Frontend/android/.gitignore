@@ -14,10 +14,3 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
-
-# Added by AI - Sensitive Backend Files (just in case)
-# Service Account Keys
-mystwell-*.json
-
-# Backend Environment Variables
-.env
