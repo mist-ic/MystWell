@@ -69,140 +69,140 @@ const capitalizeFirstLetter = (str: string) => {
 export default function MedicineScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const makeStyles = (theme: MD3Theme) => StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    content: {
-        flex: 1,
-        paddingHorizontal: 16,
-    },
-    searchContainerMargin: {
-        marginTop: 8,
-        marginBottom: 8,
-    },
-    scrollView: {
-        flex: 1,
-    },
-    section: {
-        marginTop: 16,
-        flex: 1,
-    },
-    sectionTitle: {
-        marginBottom: 12,
-        marginLeft: 8,
-    },
-    medicineCard: {
-        marginBottom: 12,
-        borderRadius: 12,
-        elevation: 2,
-    },
-    medicineContent: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-    },
-    medicineContentCollapsed: {
-        // Styles when collapsed (if any)
-    },
-    medicineHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    medicineInfo: {
-        flex: 1,
-        marginRight: 8,
-    },
-    medicineName: {
-        fontWeight: '600',
-        marginBottom: 4,
-    },
-    medicineSubInfo: {
-        fontSize: 14,
-        color: theme.colors.onSurfaceVariant,
-        marginBottom: 8,
-    },
-    quantityContainer: {
-        marginTop: 4,
-    },
-    progressBar: {
-        height: 6,
-        borderRadius: 3,
-        marginBottom: 4,
-    },
-    quantityText: {
-        fontSize: 12,
-        color: theme.colors.onSurfaceVariant,
-    },
-    detailsContainer: {
-        overflow: 'hidden',
-    },
-    detailsContent: {
-        paddingHorizontal: 16,
-        paddingBottom: 16,
-    },
-    divider: {
-        marginVertical: 12,
-    },
-    detailText: {
-        marginBottom: 8,
-        fontSize: 14,
-        lineHeight: 20,
-    },
-    detailTitle: {
-        fontWeight: '600',
-        marginTop: 8,
-        marginBottom: 4,
-        fontSize: 14,
-    },
-    detailListItem: {
-        marginLeft: 16,
-        fontSize: 14,
-        lineHeight: 20,
-    },
-    actionsContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginTop: 16,
-    },
-    actionButton: {
-        flex: 1,
-        marginHorizontal: 4,
-    },
-    actionButtonLabel: {
-        fontSize: 12,
-    },
-    fab: {
-        position: 'absolute',
-        margin: 16,
-        right: 0,
-        bottom: 0,
-    },
-    resultsList: {
-        flex: 1,
-    },
-    apiResultItem: {
-        backgroundColor: theme.colors.surface,
-        marginBottom: 2,
-        borderRadius: 4,
-        elevation: 1,
-    },
-    loader: {
-        marginTop: 20,
-        marginBottom: 20,
-    },
-    errorText: {
-        color: theme.colors.error,
-        textAlign: 'center',
-        marginTop: 20,
-        fontSize: 16,
-    },
-    infoText: {
-        textAlign: 'center',
-        marginTop: 20,
-        fontSize: 16,
-        color: theme.colors.onSurfaceVariant,
-    },
+const makeStyles = (theme: MD3Theme) => StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  searchContainerMargin: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  section: {
+    marginTop: 16,
+    flex: 1,
+  },
+  sectionTitle: {
+    marginBottom: 12,
+    marginLeft: 8,
+  },
+  medicineCard: {
+    marginBottom: 12,
+    borderRadius: 12,
+    elevation: 2,
+  },
+  medicineContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  medicineContentCollapsed: {
+    // Styles when collapsed (if any)
+  },
+  medicineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  medicineInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  medicineName: {
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  medicineSubInfo: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 8,
+  },
+  quantityContainer: {
+    marginTop: 4,
+  },
+  progressBar: {
+    height: 6,
+    borderRadius: 3,
+    marginBottom: 4,
+  },
+  quantityText: {
+    fontSize: 12,
+    color: theme.colors.onSurfaceVariant,
+  },
+  detailsContainer: {
+    overflow: 'hidden',
+  },
+  detailsContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  divider: {
+    marginVertical: 12,
+  },
+  detailText: {
+    marginBottom: 8,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  detailTitle: {
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 4,
+    fontSize: 14,
+  },
+  detailListItem: {
+    marginLeft: 16,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 16,
+  },
+  actionButton: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  actionButtonLabel: {
+    fontSize: 12,
+  },
+  fab: {
+    position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 0,
+  },
+  resultsList: {
+      flex: 1,
+  },
+  apiResultItem: {
+    backgroundColor: theme.colors.surface,
+    marginBottom: 2,
+    borderRadius: 4,
+    elevation: 1,
+  },
+  loader: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  errorText: {
+    color: theme.colors.error,
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+  },
+  infoText: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+    color: theme.colors.onSurfaceVariant,
+  },
     reminderFormContainer: {
         padding: 16,
         backgroundColor: theme.colors.background,
@@ -393,17 +393,17 @@ export default function MedicineScreen() {
       debouncedApiSearch.cancel(); // Cleanup on unmount
     };
   }, [searchQuery, debouncedApiSearch]);
-
+  
   const handleMedicinePress = (medicineId: string) => {
     const isCurrentlyExpanded = expandedMedicineId === medicineId;
     const animation = getAnimation(medicineId); // Get existing or create new animation value
-
+    
     // Animate open/close
-    Animated.timing(animation, {
+      Animated.timing(animation, {
         toValue: isCurrentlyExpanded ? 0 : 1,
         duration: 250, // Standard duration for expansion animations
         useNativeDriver: false, // height/opacity animations require this
-    }).start(() => {
+      }).start(() => {
          // Update state AFTER animation completes
         setExpandedMedicineId(isCurrentlyExpanded ? null : medicineId);
     });
@@ -887,12 +887,12 @@ export default function MedicineScreen() {
     if (quantityPercentage < 0.2) progressColor = theme.colors.error;
     else if (quantityPercentage < 0.5) progressColor = theme.colors.tertiary;
 
-  return (
+    return (
       <Surface key={medicine.id} style={styles.medicineCard} elevation={1}>
           <TouchableOpacity onPress={() => handleMedicinePress(medicine.id)} activeOpacity={0.8}>
               <View style={[styles.medicineContent]}>
-                  <View style={styles.medicineHeader}>
-                      <View style={styles.medicineInfo}>
+            <View style={styles.medicineHeader}>
+              <View style={styles.medicineInfo}>
                           <Text variant="titleMedium" style={styles.medicineName}>{medicine.name}</Text>
                           <Text style={styles.medicineSubInfo}>{medicine.dosage} - {medicine.frequency}</Text>
                       </View>
@@ -904,19 +904,19 @@ export default function MedicineScreen() {
                            />
                        </Animated.View>
                   </View>
-                   <View style={styles.quantityContainer}>
+                <View style={styles.quantityContainer}>
                        <ProgressBar progress={quantityPercentage} color={progressColor} style={styles.progressBar} />
                        <Text style={styles.quantityText}>
                            {medicine.quantity.current} / {medicine.quantity.total} {medicine.quantity.unit} remaining
-                       </Text>
-                   </View>
-              </View>
+                  </Text>
+                </View>
+            </View>
           </TouchableOpacity>
 
           <Animated.View style={[styles.detailsContainer, { height: heightInterpolate }]}>
               {isExpanded && (
                   <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }}>
-                       <View style={styles.detailsContent}>
+              <View style={styles.detailsContent}>
                           <Text style={[styles.detailText, {fontStyle: 'italic'}]}>{medicine.purpose}</Text>
                           <Divider style={styles.divider} />
 
@@ -935,35 +935,35 @@ export default function MedicineScreen() {
                               <Text key={index} style={styles.detailListItem}>• {item}</Text>
                           ))}
 
-                           <View style={styles.actionsContainer}>
-                               <Button
-                                    mode="contained-tonal"
+                <View style={styles.actionsContainer}>
+                  <Button 
+                    mode="contained-tonal" 
                                     icon="pencil-outline"
                                     onPress={() => console.log('Edit Reminder:', medicine.id)}
-                                    style={styles.actionButton}
-                                    labelStyle={styles.actionButtonLabel}
-                               >
+                    style={styles.actionButton}
+                    labelStyle={styles.actionButtonLabel}
+                  >
                                    Edit
-                               </Button>
-                                 <Button
+                  </Button>
+                  <Button 
                                     mode="outlined"
                                     icon="delete-outline"
                                     onPress={() => console.log('Delete Reminder:', medicine.id)}
-                                    style={styles.actionButton}
-                                    labelStyle={styles.actionButtonLabel}
+                    style={styles.actionButton}
+                    labelStyle={styles.actionButtonLabel}
                                     textColor={theme.colors.error}
-                               >
+                  >
                                    Delete
-                               </Button>
-                           </View>
-                      </View>
+                  </Button>
+                </View>
+              </View>
                   </ScrollView>
-              )}
+            )}
           </Animated.View>
-      </Surface>
+        </Surface>
     );
   };
-
+  
   const renderApiResultItem = ({ item }: { item: DrugConcept }) => (
     <TouchableOpacity onPress={() => handleApiResultSelect(item)}>
       <List.Item
@@ -978,14 +978,14 @@ export default function MedicineScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <AppHeader title="Add / Manage Medicine" />
-
+      
       <View style={styles.content}>
         <View style={styles.searchContainerMargin}>
-           <StyledSearchBar
+        <StyledSearchBar
               placeholder="Search for medicine to add..."
-              onChangeText={setSearchQuery}
-              value={searchQuery}
-           />
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+        />
         </View>
 
         {searchQuery.length > 0 || isSearching || searchError ? (
@@ -993,13 +993,13 @@ export default function MedicineScreen() {
              {isSearching && <ActivityIndicator animating={true} size="large" style={styles.loader} />}
              {searchError && !isSearching && <Text style={styles.errorText}>{searchError}</Text>}
              {!isSearching && !searchError && searchResults.length > 0 && (
-                <FlatList
-                  data={searchResults}
-                  renderItem={renderApiResultItem}
+                <FlatList 
+                    data={searchResults}
+                    renderItem={renderApiResultItem}
                   keyExtractor={(item) => item.rxcui + item.tty}
-                  style={styles.resultsList}
+                    style={styles.resultsList}
                 />
-             )}
+            )}
              {!isSearching && !searchError && searchQuery.length >= 3 && searchResults.length === 0 && (
                  <Text style={styles.infoText}>No results found for "{searchQuery}".</Text>
              )}
@@ -1023,9 +1023,9 @@ export default function MedicineScreen() {
       </View>
 
        <View style={styles.fabContainer}>
-           <FAB
-                icon="plus"
-                style={styles.fab}
+        <FAB
+          icon="plus"
+          style={styles.fab}
                 onPress={() => {
                     setReminderForm(initialReminderFormState);
                     setShowReminderForm(true);

@@ -77,6 +77,10 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           type: SchemaType.OBJECT,
           description: "Extracted information from a medical document.", // Optional top-level description
           properties: {
+              headerDescription: {
+                  type: SchemaType.STRING,
+                  description: "A detailed, concise summary of the document's content, suitable for identifying relevance without reading the full text. Include patient name (if found), document type, date, provider, and key findings/purpose."
+              },
               detected_document_type: { 
                   type: SchemaType.STRING, 
                   description: "The type of medical document identified (e.g., Prescription, Lab Report, Doctor's Note, Invoice)."
@@ -126,10 +130,10 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       };
 
       // 5. Call Gemini API
-      this.logger.log(`Calling Gemini API (model: gemini-2.5-flash-preview-04-17) for document ${documentId}...`);
+      this.logger.log(`Calling Gemini API (model: gemini-1.5-flash-latest) for document ${documentId}...`);
       
       const model = this.googleAiClient.getGenerativeModel({
-          model: "gemini-2.5-flash-preview-04-17",
+          model: "gemini-1.5-flash-latest",
           safetySettings: [
                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -188,35 +192,76 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
         throw new Error('Invalid or incomplete JSON structure received from Gemini');
       }
 
-      await this.updateDocumentStatus(documentId, 'processed', extractedJson);
+      // 6. ---> Generate Embedding <--- 
+      let embeddingVector: number[] | null = null;
+      const textToEmbed = extractedJson.headerDescription;
+
+      if (textToEmbed && typeof textToEmbed === 'string' && textToEmbed.trim().length > 0) {
+          try {
+              this.logger.log(`Generating embedding for document ${documentId} using headerDescription...`);
+              const embeddingModel = this.googleAiClient.getGenerativeModel({ model: "text-embedding-004" });
+              const embeddingResult = await embeddingModel.embedContent(textToEmbed);
+              embeddingVector = embeddingResult?.embedding?.values ?? null;
+              if (embeddingVector) {
+                  this.logger.log(`Successfully generated embedding for document ${documentId} (dimensions: ${embeddingVector.length})`);
+              } else {
+                   this.logger.warn(`Embedding generation returned no values for document ${documentId}.`);
+              }
+          } catch (embeddingError) {
+               this.logger.error(`Failed to generate embedding for document ${documentId}: ${embeddingError.message}`, embeddingError.stack);
+               // Decide if this should be a fatal error for the job? 
+               // For now, log the error and continue without embedding.
+          }
+      } else {
+           this.logger.warn(`No valid headerDescription found in extracted JSON for document ${documentId}. Skipping embedding.`);
+      }
+      // ---> End Embedding Generation <--- 
+
+      // 7. Update final status and save data (including embedding)
+      await this.updateDocumentStatus(documentId, 'processed', extractedJson, embeddingVector);
       this.logger.log(`Job ${job.id} completed successfully for document ${documentId}.`);
       return { success: true };
 
     } catch (error) {
       this.logger.error(`Job ${job.id} failed for document ${documentId}: ${error.message}`, error.stack);
-      await this.updateDocumentStatus(documentId, 'processing_failed', null, error.message);
+      await this.updateDocumentStatus(documentId, 'processing_failed', undefined, null, error.message);
       throw error;
     }
   }
 
-  private async updateDocumentStatus(documentId: string, status: string, structuredData?: any, errorMessage?: string) {
-      const updateData: any = { status, updated_at: new Date() };
-      if (status === 'processed' && structuredData) {
-          updateData.structured_data = structuredData;
-          updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
-          updateData.error_message = null;
-      }
-      if (status === 'processing_failed') {
+  private async updateDocumentStatus(documentId: string, status: string, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
+      const updateData: any = { 
+          status,
+          updated_at: new Date(),
+          // Reset error message unless explicitly setting failed status
+          error_message: status === 'processing_failed' ? errorMessage?.substring(0, 500) : null 
+      }; 
+
+      if (status === 'processed') {
+          if (structuredData) {
+              updateData.structured_data = structuredData;
+              updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
+          }
+          if (embedding) { // Add embedding if available
+             updateData.embedding = embedding;
+          }
+      } 
+      // No need for separate check for processing_failed error message, handled above
+      /* else if (status === 'processing_failed') { 
           updateData.error_message = errorMessage?.substring(0, 500);
-      }
-      const BUCKET_NAME = 'documents';
+      } */
+
       const { error } = await this.supabaseAdmin
           .from('documents')
           .update(updateData)
           .eq('id', documentId);
 
       if (error) {
-          this.logger.error(`Failed to update status for document ${documentId} to ${status}: ${error.message}`);
+          this.logger.error(`Failed to update status/data for document ${documentId} to ${status}: ${error.message}`);
+          // Don't throw here, as the main processing might have succeeded, 
+          // but log that the final update failed.
+      } else {
+          this.logger.log(`Successfully updated document ${documentId} status to ${status}` + (embedding ? ' with embedding.' : '.'));
       }
   }
 } 

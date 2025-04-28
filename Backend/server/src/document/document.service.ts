@@ -23,13 +23,19 @@ export interface Document {
   updated_at: string;
 }
 
+// Define the structure returned by the match_documents function
+interface MatchedDocument {
+  id: string;
+  header_description: string | null; // Match the return type of the function
+  similarity: number;
+}
+
 @Injectable()
 export class DocumentService {
   private readonly logger = new Logger(DocumentService.name);
   private readonly BUCKET_NAME = 'documents'; // Change to match the bucket we'll create
 
   constructor(
-    @Inject(SUPABASE_REQUEST_CLIENT) private readonly supabase: SupabaseClient,
     @Inject(SUPABASE_SERVICE_ROLE_CLIENT) private readonly supabaseAdmin: SupabaseClient, // Inject service role client
     @InjectQueue(DOCUMENT_PROCESSING_QUEUE) private readonly documentQueue: Queue,
     private readonly profileService: ProfileService,
@@ -240,8 +246,8 @@ export class DocumentService {
     }
 
     // Generate signed URL for download (expires in 5 minutes)
-    // Use the user-scoped client for creating the download URL itself for security
-    const { data, error } = await this.supabase.storage 
+    // Use the ADMIN client now, as the request-scoped one is removed
+    const { data, error } = await this.supabaseAdmin.storage
       .from(this.BUCKET_NAME)
       .createSignedUrl(document.storage_path, 60 * 5); // 5 minutes expiry
 
@@ -273,8 +279,8 @@ export class DocumentService {
       throw new InternalServerErrorException('Failed to re-queue document for processing.');
     }
 
-    // Update status to queued
-    const { error: updateError } = await this.supabase
+    // Update status to queued - use ADMIN client
+    const { error: updateError } = await this.supabaseAdmin
       .from('documents')
       .update({ status: 'queued', error_message: null, updated_at: new Date() }) // Clear previous error
       .eq('id', documentId)
@@ -290,14 +296,15 @@ export class DocumentService {
 
   async renameDocument(userId: string, documentId: string, renameDto: RenameDocumentDto): Promise<Document> {
     const profileId = await this.getProfileIdForUser(userId);
-    // First verify ownership by fetching the document
+    // Verify ownership (uses getDocumentById, which uses supabaseAdmin)
     await this.getDocumentById(profileId, documentId);
 
-    const { data: updatedDoc, error: updateError } = await this.supabase
+    // Use ADMIN client for the update
+    const { data: updatedDoc, error: updateError } = await this.supabaseAdmin
       .from('documents')
       .update({ display_name: renameDto.displayName, updated_at: new Date() })
       .eq('id', documentId)
-      .eq('profile_id', profileId) // Redundant check, but safe
+      .eq('profile_id', profileId) 
       .select()
       .single();
 
@@ -313,9 +320,9 @@ export class DocumentService {
     const profileId = await this.getProfileIdForUser(userId);
     const document = await this.getDocumentById(profileId, documentId);
 
-    // Delete storage object first
+    // Delete storage object first - use ADMIN client
     this.logger.log(`Deleting storage object ${document.storage_path}`);
-    const { error: storageError } = await this.supabase.storage
+    const { error: storageError } = await this.supabaseAdmin.storage
       .from(this.BUCKET_NAME)
       .remove([document.storage_path]);
 
@@ -324,8 +331,8 @@ export class DocumentService {
         this.logger.error(`Failed to delete storage object ${document.storage_path}: ${storageError.message}. Proceeding with DB deletion.`);
     }
 
-    // Delete database record
-    const { error: dbError } = await this.supabase
+    // Delete database record - use ADMIN client
+    const { error: dbError } = await this.supabaseAdmin
       .from('documents')
       .delete()
       .eq('id', documentId)
@@ -341,7 +348,7 @@ export class DocumentService {
     // Example function to test the request-scoped client
     async getUserIdFromClient(userId: string): Promise<string | null> {
         const profileId = await this.getProfileIdForUser(userId); // Use internal helper
-        const { data: { user }, error } = await this.supabase.auth.getUser();
+        const { data: { user }, error } = await this.supabaseAdmin.auth.getUser();
         if (error) {
         this.logger.error(`Error getting user from request-scoped client: ${error.message}`);
         return null;
@@ -352,4 +359,45 @@ export class DocumentService {
         this.logger.log(`Request-scoped client authenticated as user: ${user?.id}, profile: ${profileId}`);
         return user?.id ?? null;
     }
+
+  // --- ADDED: Vector Search Method --- 
+  async findRelevantDocuments(
+    profileId: string, 
+    queryEmbedding: number[], 
+    matchCount: number = 5, // Default limit
+    matchThreshold: number = 0.75 // Default threshold (adjust based on testing)
+  ): Promise<MatchedDocument[]> { 
+    if (!queryEmbedding || queryEmbedding.length === 0) {
+      this.logger.warn(`findRelevantDocuments called for profile ${profileId} with empty embedding.`);
+      return [];
+    }
+    
+    this.logger.log(`Finding relevant documents for profile ${profileId} (threshold: ${matchThreshold}, count: ${matchCount})`);
+
+    try {
+      // Call the database function using RPC with the service role client
+      const { data, error } = await this.supabaseAdmin.rpc('match_documents', {
+        query_embedding: queryEmbedding, // Pass the embedding vector
+        query_profile_id: profileId,     // Pass the profile ID for filtering
+        match_threshold: matchThreshold, // Pass the similarity threshold
+        match_count: matchCount         // Pass the result limit
+      });
+
+      if (error) {
+        this.logger.error(`RPC match_documents failed for profile ${profileId}: ${error.message}`, error.stack);
+        throw new InternalServerErrorException('Failed to search for relevant documents.');
+      }
+
+      this.logger.log(`Found ${data?.length ?? 0} relevant documents for profile ${profileId}.`);
+      return (data as MatchedDocument[]) || []; // Type assertion
+
+    } catch (error) {
+      // Catch potential exceptions from the RPC call itself or re-thrown errors
+      if (error instanceof InternalServerErrorException) throw error;
+      
+      this.logger.error(`Unexpected error during document vector search for profile ${profileId}: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('An unexpected error occurred while searching documents.');
+    }
+  }
+  // --- END: Vector Search Method --- 
 } 
