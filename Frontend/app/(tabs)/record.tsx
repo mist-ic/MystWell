@@ -405,7 +405,7 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     
     setIsReTranscribing(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/recordings/${recording.id}/retranscribe`, {
+      const response = await fetch(`${API_BASE_URL}/recordings/${recording.id}/retry-transcription`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,

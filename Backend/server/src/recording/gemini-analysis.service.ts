@@ -59,9 +59,10 @@ Extract the information and provide ONLY the JSON object:
 
   async extractDetailsFromTranscript(
     transcript: string,
+    profileId: string,
   ): Promise<StructuredRecordingDetails | null> {
     this.logger.log(
-      `Starting Gemini analysis for transcript (length: ${transcript.length})...`,
+      `Starting Gemini analysis for transcript (length: ${transcript.length}) for profile ${profileId}...`,
     );
 
     const model = this.genAI.getGenerativeModel({ model: this.modelId });

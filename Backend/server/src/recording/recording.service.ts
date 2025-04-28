@@ -307,6 +307,14 @@ export class RecordingService {
             profileId: profileId,
             storagePath: updatedRecord.storage_path, 
             userId: userId, 
+          }, {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 10000,
+            },
+            removeOnComplete: true,
+            removeOnFail: 1000
           });
           // Update status to 'queued' after successfully adding to queue
           return this.updateRecordingStatusInternal(recordingId, STATUS_QUEUED); 

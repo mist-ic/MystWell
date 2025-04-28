@@ -129,6 +129,14 @@ export class DocumentService {
         documentId,
         profileId,
         displayName: displayName // Pass the displayName to the job
+      }, {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 10000,
+        },
+        removeOnComplete: true,
+        removeOnFail: 1000
       });
     } catch (queueError) {
       this.logger.error(`Failed to add job to queue for document ${documentId}: ${queueError.message}`);
