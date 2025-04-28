@@ -1,5 +1,10 @@
-\
-# ... existing code ...
+name: Build and deploy Node.js app to Azure Web App - mystwell-api
+
+on:
+  push:
+    branches:
+      - Reviewd
+  workflow_dispatch:
 
 jobs:
   build:
