@@ -1,11 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { StyleSheet, View, ScrollView, TouchableOpacity, Animated } from 'react-native';
-import { Text, useTheme, Searchbar, Surface, Button, Portal, Modal, Chip, List, Divider, ProgressBar, FAB, Badge } from 'react-native-paper';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { StyleSheet, View, ScrollView, TouchableOpacity, Animated, ActivityIndicator, FlatList } from 'react-native';
+import { Text, useTheme, Searchbar, Surface, Button, Portal, Modal, Chip, List, Divider, ProgressBar, FAB, Badge, MD3Theme } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import debounce from 'lodash.debounce';
 import AppHeader from '@/components/AppHeader';
 import { StyledSearchBar } from '@/components/ui/StyledSearchBar';
+import { searchDrugsApproximate, DrugConcept } from '@/services/medicineService';
 
 interface Medicine {
   id: string;
@@ -24,16 +26,159 @@ interface Medicine {
   };
 }
 
+const makeStyles = (theme: MD3Theme) => StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  searchContainerMargin: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  section: {
+    marginTop: 16,
+    flex: 1,
+  },
+  sectionTitle: {
+    marginBottom: 12,
+    marginLeft: 8,
+  },
+  medicineCard: {
+    marginBottom: 12,
+    borderRadius: 12,
+    elevation: 2,
+  },
+  medicineContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  medicineContentCollapsed: {
+    // Styles when collapsed (if any)
+  },
+  medicineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  medicineInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  medicineName: {
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  medicineSubInfo: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 8,
+  },
+  quantityContainer: {
+    marginTop: 4,
+  },
+  progressBar: {
+    height: 6,
+    borderRadius: 3,
+    marginBottom: 4,
+  },
+  quantityText: {
+    fontSize: 12,
+    color: theme.colors.onSurfaceVariant,
+  },
+  detailsContainer: {
+    overflow: 'hidden',
+  },
+  detailsContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  divider: {
+    marginVertical: 12,
+  },
+  detailText: {
+    marginBottom: 8,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  detailTitle: {
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 4,
+    fontSize: 14,
+  },
+  detailListItem: {
+    marginLeft: 16,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 16,
+  },
+  actionButton: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  actionButtonLabel: {
+    fontSize: 12,
+  },
+  fab: {
+    position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 0,
+  },
+  resultsList: {
+      flex: 1,
+  },
+  apiResultItem: {
+    backgroundColor: theme.colors.surface,
+    marginBottom: 2,
+    borderRadius: 4,
+    elevation: 1,
+  },
+  loader: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  errorText: {
+    color: theme.colors.error,
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+  },
+  infoText: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+    color: theme.colors.onSurfaceVariant,
+  },
+});
+
+// Helper function to capitalize the first letter
+const capitalizeFirstLetter = (str: string) => {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
 export default function MedicineScreen() {
   const theme = useTheme();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<DrugConcept[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
   const [expandedMedicineId, setExpandedMedicineId] = useState<string | null>(null);
   const [cartItems, setCartItems] = useState<Medicine[]>([]);
   const animationsMap = useRef<{ [key: string]: Animated.Value }>({});
 
-  // Initialize animations for each medicine
   const getAnimation = (medicineId: string) => {
     if (!animationsMap.current[medicineId]) {
       animationsMap.current[medicineId] = new Animated.Value(0);
@@ -41,7 +186,6 @@ export default function MedicineScreen() {
     return animationsMap.current[medicineId];
   };
 
-  // Mock data for current medications
   const currentMedications: Medicine[] = [
     {
       id: '1',
@@ -77,32 +221,51 @@ export default function MedicineScreen() {
     }
   ];
 
-  // Mock data for medicine database
-  const allMedicines: Medicine[] = [
-    ...currentMedications,
-    {
-      id: '3',
-      name: 'Metformin',
-      dosage: '500mg',
-      frequency: 'Twice daily',
-      purpose: 'Control blood sugar levels in type 2 diabetes',
-      composition: ['Metformin hydrochloride', 'Povidone', 'Magnesium stearate'],
-      sideEffects: ['Nausea', 'Diarrhea', 'Loss of appetite'],
-      substitutes: ['Glipizide', 'Glyburide', 'Sitagliptin'],
-      isActive: false,
-      quantity: {
-        current: 0,
-        total: 60,
-        unit: 'tablets'
+  const debouncedApiSearch = useCallback(
+    debounce(async (query: string) => {
+      if (query.trim().length < 3) {
+        setSearchResults([]);
+        setIsSearching(false);
+        setSearchError(null);
+        return;
       }
-    },
-  ];
+      setIsSearching(true);
+      setSearchError(null);
+      try {
+        console.log(`Searching RxNorm Approximate for: ${query}`);
+        const results = await searchDrugsApproximate(query);
+        setSearchResults(results);
+        console.log(`Found ${results.length} approximate results.`);
+      } catch (err) {
+        setSearchError('Failed to fetch medicines. Please try again.');
+        setSearchResults([]);
+        console.error('RxNorm Approximate Search Error:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 700),
+    []
+  );
 
+  useEffect(() => {
+    if (searchQuery.trim()) {
+        debouncedApiSearch(searchQuery);
+    } else {
+        setSearchResults([]);
+        setIsSearching(false);
+        setSearchError(null);
+        debouncedApiSearch.cancel();
+    }
+
+    return () => {
+      debouncedApiSearch.cancel();
+    };
+  }, [searchQuery, debouncedApiSearch]);
+  
   const handleMedicinePress = (medicineId: string) => {
     const animation = getAnimation(medicineId);
     
     if (expandedMedicineId === medicineId) {
-      // Collapse animation
       Animated.timing(animation, {
         toValue: 0,
         duration: 200,
@@ -111,7 +274,6 @@ export default function MedicineScreen() {
         setExpandedMedicineId(null);
       });
     } else {
-      // Expand animation
       setExpandedMedicineId(medicineId);
       Animated.timing(animation, {
         toValue: 1,
@@ -121,14 +283,16 @@ export default function MedicineScreen() {
     }
   };
 
+  const handleApiResultSelect = (drug: DrugConcept) => {
+    router.push(`/medicine/${drug.rxcui}`);
+  };
+
   const handleReorder = (medicineId: string) => {
     router.push(`/medicine/reorder?id=${medicineId}`);
   };
 
   const filteredMedicines = searchQuery
-    ? allMedicines.filter(med => 
-        med.name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+    ? searchResults
     : currentMedications;
 
   const addToCart = (medicine: Medicine) => {
@@ -141,6 +305,108 @@ export default function MedicineScreen() {
     router.push('/medicine/reorder');
   };
 
+  const renderCurrentMedicationItem = (medicine: Medicine) => {
+    const animation = getAnimation(medicine.id);
+    const isInCart = cartItems.some(item => item.id === medicine.id);
+    return (
+      <View key={medicine.id}>
+        <Surface style={[styles.medicineCard, { backgroundColor: theme.colors.primaryContainer }]}>
+          <TouchableOpacity 
+            style={[styles.medicineContent, expandedMedicineId !== medicine.id && styles.medicineContentCollapsed]}
+            onPress={() => handleMedicinePress(medicine.id)}
+          >
+            <View style={styles.medicineHeader}>
+              <View style={styles.medicineInfo}>
+                <Text variant="titleMedium" style={styles.medicineName}>
+                  {medicine.name}
+                </Text>
+                <Text variant="bodyMedium" style={styles.medicineSubInfo}>
+                  {medicine.dosage} • {medicine.frequency}
+                </Text>
+                <View style={styles.quantityContainer}>
+                  <ProgressBar 
+                    progress={medicine.quantity.current / medicine.quantity.total} 
+                    color={theme.colors.primary}
+                    style={styles.progressBar}
+                  />
+                  <Text variant="bodySmall" style={styles.quantityText}>
+                    {medicine.quantity.current} of {medicine.quantity.total} {medicine.quantity.unit} left
+                  </Text>
+                </View>
+              </View>
+              <Animated.View style={{
+                transform: [{
+                  rotate: animation.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0deg', '180deg']
+                  })
+                }]
+              }}>
+                <MaterialCommunityIcons name="chevron-down" size={24} color={theme.colors.onSurface} />
+              </Animated.View>
+            </View>
+          </TouchableOpacity>
+          <Animated.View style={[styles.detailsContainer, {
+            height: animation.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 250]
+            }),
+            opacity: animation,
+          }]}>
+            {expandedMedicineId === medicine.id && (
+              <View style={styles.detailsContent}>
+                <Divider style={styles.divider}/>
+                <Text variant="bodyMedium" style={styles.detailText}>Purpose: {medicine.purpose}</Text>
+                <Text variant="bodyMedium" style={styles.detailTitle}>Composition:</Text>
+                {medicine.composition.map((comp, idx) => <Text key={idx} style={styles.detailListItem}>• {comp}</Text>)}
+                <Text variant="bodyMedium" style={styles.detailTitle}>Side Effects:</Text>
+                {medicine.sideEffects.map((effect, idx) => <Text key={idx} style={styles.detailListItem}>• {effect}</Text>)}
+                <Text variant="bodyMedium" style={styles.detailTitle}>Substitutes:</Text>
+                {medicine.substitutes.map((sub, idx) => <Text key={idx} style={styles.detailListItem}>• {sub}</Text>)}
+                <View style={styles.actionsContainer}>
+                  <Button 
+                    mode="contained-tonal" 
+                    onPress={() => handleReorder(medicine.id)}
+                    icon="repeat-variant"
+                    style={styles.actionButton}
+                    labelStyle={styles.actionButtonLabel}
+                  >
+                    Reorder
+                  </Button>
+                  <Button 
+                    mode="contained" 
+                    onPress={() => addToCart(medicine)}
+                    icon={isInCart ? "check" : "cart-plus"}
+                    style={styles.actionButton}
+                    disabled={isInCart}
+                    labelStyle={styles.actionButtonLabel}
+                  >
+                    {isInCart ? 'Added' : 'Add to Cart'}
+                  </Button>
+                </View>
+              </View>
+            )}
+          </Animated.View>
+        </Surface>
+      </View>
+    );
+  };
+
+  
+  
+  const renderApiResultItem = ({ item }: { item: DrugConcept }) => (
+    <TouchableOpacity onPress={() => handleApiResultSelect(item)}>
+      <List.Item
+        title={capitalizeFirstLetter(item.name)}
+        titleNumberOfLines={2}
+        description={`RxCUI: ${item.rxcui}`}
+        style={styles.apiResultItem}
+      />
+    </TouchableOpacity>
+  );
+
+  const styles = makeStyles(theme);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <AppHeader 
@@ -152,366 +418,52 @@ export default function MedicineScreen() {
       
       <View style={styles.content}>
         <StyledSearchBar
-          placeholder="Search medicines..."
+          placeholder="Search RxNorm database..."
           onChangeText={setSearchQuery}
           value={searchQuery}
           containerStyle={styles.searchContainerMargin}
         />
 
-        <ScrollView style={styles.scrollView}>
+        {searchQuery.trim().length > 0 ? (
           <View style={styles.section}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>
-              {searchQuery ? 'Search Results' : 'Current Medications'}
-            </Text>
-            {filteredMedicines.map((medicine) => {
-              const animation = getAnimation(medicine.id);
-              const isInCart = cartItems.some(item => item.id === medicine.id);
-              return (
-                <View key={medicine.id}>
-                  <Surface style={[styles.medicineCard, { backgroundColor: theme.colors.primaryContainer }]}>
-                    <TouchableOpacity 
-                      style={[styles.medicineContent, expandedMedicineId !== medicine.id && styles.medicineContentCollapsed]}
-                      onPress={() => handleMedicinePress(medicine.id)}
-                    >
-                      <View style={styles.medicineHeader}>
-                        <View style={styles.medicineInfo}>
-                          <Text variant="titleMedium" style={styles.medicineName}>
-                            {medicine.name}
-                          </Text>
-                          <Text variant="bodyMedium" style={styles.medicineSubInfo}>
-                            {medicine.dosage} • {medicine.frequency}
-                          </Text>
-                          <View style={styles.quantityContainer}>
-                            <ProgressBar 
-                              progress={medicine.quantity.current / medicine.quantity.total} 
-                              color={theme.colors.primary}
-                              style={styles.progressBar}
-                            />
-                            <Text variant="bodySmall" style={styles.quantityText}>
-                              {medicine.quantity.current} of {medicine.quantity.total} {medicine.quantity.unit} left
-                            </Text>
-                          </View>
-                        </View>
-                        <Animated.View style={{
-                          transform: [{
-                            rotate: animation.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ['0deg', '180deg']
-                            })
-                          }]
-                        }}>
-                          <MaterialCommunityIcons 
-                            name="chevron-down"
-                            size={24} 
-                            color={theme.colors.primary} 
-                          />
-                        </Animated.View>
-                      </View>
-                    </TouchableOpacity>
-                    {expandedMedicineId === medicine.id && (
-                      <Animated.View style={[
-                        styles.actionButtonsContainer,
-                        {
-                          opacity: animation,
-                          transform: [{
-                            translateY: animation.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [-20, 0]
-                            })
-                          }]
-                        }
-                      ]}>
-                        <TouchableOpacity 
-                          style={styles.actionButton}
-                          onPress={() => setSelectedMedicine(medicine)}
-                        >
-                          <MaterialCommunityIcons 
-                            name="eye-outline" 
-                            size={24} 
-                            color={theme.colors.primary} 
-                            style={styles.actionIcon}
-                          />
-                          <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>
-                            View
-                          </Text>
-                        </TouchableOpacity>
-                        <View style={styles.buttonDivider} />
-                        <TouchableOpacity 
-                          style={styles.actionButton}
-                          onPress={() => isInCart ? goToCart() : addToCart(medicine)}
-                        >
-                          <MaterialCommunityIcons 
-                            name={isInCart ? "cart" : "cart-plus"} 
-                            size={24} 
-                            color={theme.colors.primary} 
-                            style={styles.actionIcon}
-                          />
-                          <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>
-                            {isInCart ? 'View Cart' : 'Add to Cart'}
-                          </Text>
-                        </TouchableOpacity>
-                      </Animated.View>
-                    )}
-                  </Surface>
-                </View>
-              );
-            })}
-          </View>
-        </ScrollView>
-
-        {/* Medicine Detail Modal */}
-        <Portal>
-          <Modal
-            visible={selectedMedicine !== null}
-            onDismiss={() => setSelectedMedicine(null)}
-            contentContainerStyle={styles.modalContainer}
-          >
-            {selectedMedicine && (
-              <ScrollView style={styles.modalContent}>
-                <View style={styles.modalHeader}>
-                  <Text variant="headlineSmall" style={styles.modalTitle}>
-                    {selectedMedicine.name}
-                  </Text>
-                  <TouchableOpacity 
-                    onPress={() => setSelectedMedicine(null)}
-                    style={styles.closeButton}
-                  >
-                    <MaterialCommunityIcons name="close" size={24} color="#666" />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Dosage Information
-                  </Text>
-                  <Text variant="bodyLarge">
-                    {selectedMedicine.dosage} • {selectedMedicine.frequency}
-                  </Text>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Remaining Quantity
-                  </Text>
-                  <View style={styles.modalQuantityContainer}>
-                    <ProgressBar 
-                      progress={selectedMedicine.quantity.current / selectedMedicine.quantity.total} 
-                      color={theme.colors.primary}
-                      style={styles.modalProgressBar}
-                    />
-                    <Text variant="bodyLarge" style={styles.modalQuantityText}>
-                      {selectedMedicine.quantity.current} of {selectedMedicine.quantity.total} {selectedMedicine.quantity.unit} remaining
-                    </Text>
-                    {selectedMedicine.quantity.current <= selectedMedicine.quantity.total * 0.2 && (
-                      <Text variant="bodyMedium" style={[styles.lowQuantityWarning, { color: theme.colors.error }]}>
-                        Low quantity - Consider reordering
-                      </Text>
-                    )}
-                  </View>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Purpose
-                  </Text>
-                  <Text variant="bodyLarge">{selectedMedicine.purpose}</Text>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Composition
-                  </Text>
-                  <View style={styles.chipContainer}>
-                    {selectedMedicine.composition.map((comp, index) => (
-                      <Chip key={index} style={styles.chip}>{comp}</Chip>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Side Effects
-                  </Text>
-                  <View style={styles.chipContainer}>
-                    {selectedMedicine.sideEffects.map((effect, index) => (
-                      <Chip key={index} style={styles.chip}>{effect}</Chip>
-                    ))}
-                  </View>
-                </View>
-
-                <View style={styles.modalSection}>
-                  <Text variant="titleMedium" style={styles.modalSectionTitle}>
-                    Possible Substitutes
-                  </Text>
-                  <View style={styles.chipContainer}>
-                    {selectedMedicine.substitutes.map((sub, index) => (
-                      <Chip key={index} style={styles.chip}>{sub}</Chip>
-                    ))}
-                  </View>
-                </View>
-              </ScrollView>
+             <Text variant="titleMedium" style={styles.sectionTitle}>Search Results</Text>
+            {isSearching && <ActivityIndicator style={styles.loader} />}
+            {searchError && <Text style={styles.errorText}>{searchError}</Text>}
+            {!isSearching && !searchError && searchResults.length === 0 && (
+                <Text style={styles.infoText}>No results found for "{searchQuery}".</Text>
             )}
-          </Modal>
-        </Portal>
+            {!isSearching && searchResults.length > 0 && (
+                <FlatList 
+                    data={searchResults}
+                    renderItem={renderApiResultItem}
+                    keyExtractor={(item, index) => item.rxcui + '-' + index}
+                    style={styles.resultsList}
+                />
+            )}
+          </View>
+        ) : (
+          <ScrollView style={styles.scrollView}>
+            <View style={styles.section}>
+              <Text variant="titleMedium" style={styles.sectionTitle}>
+                Current Medications
+              </Text>
+              {currentMedications.map(renderCurrentMedicationItem)}
+            </View>
+          </ScrollView>
+        )}
+
       </View>
+
+       {/* Keep FAB if needed, maybe for adding custom medication? */}
+       {/* 
+        <FAB
+          icon="plus"
+          style={styles.fab}
+          onPress={() => console.log('Add new medication')}
+          color={theme.colors.onPrimary}
+          label='Add New'
+        /> 
+       */}
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  searchContainerMargin: {
-    marginBottom: 16,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    marginBottom: 12,
-    fontWeight: '600',
-  },
-  medicineCard: {
-    marginBottom: 16,
-    borderRadius: 16,
-    elevation: 0,
-    overflow: 'hidden',
-  },
-  medicineContent: {
-    padding: 16,
-    paddingBottom: 0,
-  },
-  medicineContentCollapsed: {
-    paddingBottom: 16,
-  },
-  medicineHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  medicineInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  medicineName: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-    color: '#000',
-  },
-  medicineSubInfo: {
-    fontSize: 14,
-    opacity: 0.7,
-    marginBottom: 8,
-  },
-  quantityContainer: {
-    marginTop: 4,
-    width: '100%',
-  },
-  progressBar: {
-    height: 4,
-    borderRadius: 2,
-    marginBottom: 4,
-  },
-  quantityText: {
-    fontSize: 12,
-    opacity: 0.7,
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
-    marginTop: 16,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  buttonDivider: {
-    width: 1,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
-  actionIcon: {
-    marginRight: 8,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  modalContainer: {
-    backgroundColor: 'white',
-    margin: 16,
-    borderRadius: 12,
-    maxHeight: '80%',
-  },
-  modalContent: {
-    padding: 16,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  modalTitle: {
-    flex: 1,
-    fontWeight: '600',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  modalSection: {
-    marginBottom: 24,
-  },
-  modalSectionTitle: {
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  chipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    marginBottom: 4,
-  },
-  modalQuantityContainer: {
-    width: '100%',
-  },
-  modalProgressBar: {
-    height: 6,
-    borderRadius: 3,
-    marginBottom: 8,
-  },
-  modalQuantityText: {
-    marginBottom: 4,
-  },
-  lowQuantityWarning: {
-    marginTop: 4,
-  },
-  fab: {
-    position: 'absolute',
-    margin: 16,
-    right: 0,
-    bottom: 0,
-    borderRadius: 28,
-    width: 56,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-}); 
+} 

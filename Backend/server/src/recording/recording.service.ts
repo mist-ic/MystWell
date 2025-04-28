@@ -31,9 +31,10 @@ export interface Recording {
 export class RecordingService {
   private readonly logger = new Logger(RecordingService.name);
   private readonly BUCKET_NAME = 'recordings';
-  // Flag to determine whether to use service role client or regular client
-  // This can be set to false after fixing the RLS policies
-  private readonly useServiceRoleForRecordings: boolean;
+  private readonly accessibleProfilesCache = new Map<string, Set<string>>();
+  private readonly recordingsCache = new Map<string, { data: Recording[]; timestamp: number }>();
+  private readonly cacheTTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+  private readonly recordingsCacheTTL = 30 * 1000; // 30 seconds for recordings
 
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
@@ -41,182 +42,193 @@ export class RecordingService {
     @InjectQueue(RECORDING_PROCESSING_QUEUE) private recordingQueue: Queue,
     private readonly profileService: ProfileService,
     private readonly configService: ConfigService,
-  ) {
-    // Read from environment variable, default to true (safer)
-    this.useServiceRoleForRecordings = this.configService.get<string>('USE_SERVICE_ROLE_FOR_RECORDINGS') !== 'false';
-    this.logger.log(`[RecordingService] Using service role for recordings: ${this.useServiceRoleForRecordings}`);
-  }
+  ) {}
 
   // Helper to get profileId from userId, throwing Unauthorized if not found
   private async getProfileIdFromUserId(userId: string): Promise<string> {
-      // this.logger.log(`[RecordingService] Getting profile ID for user ID: ${userId}`);
       const profile = await this.profileService.getProfileByUserId(userId);
       
       if (!profile) {
-          // If profile doesn't exist for a validated Supabase user, treat as Unauthorized
-          this.logger.error(`[RecordingService] No profile found for validated user ID: ${userId}`);
           throw new UnauthorizedException('User profile not found or inaccessible.');
       }
       
-      // this.logger.log(`[RecordingService] Profile found: ID=${profile.id}, UserId=${profile.user_id}, Email=${profile.email || 'N/A'}`);
       return profile.id;
   }
 
-  /**
-   * DEBUG METHOD: Check if any recordings exist in the database
-   * This is temporary and should be removed after debugging
-   */
-  async debugCheckRecordings(): Promise<void> {
-    this.logger.log('[RecordingService] DEBUG: Checking if any recordings exist in the database');
+  // Get all profiles accessible to this user (their own profile + managed profiles)
+  private async getAccessibleProfileIds(userId: string): Promise<Set<string>> {
+    const cacheKey = `user_${userId}`;
     
-    // Use service role to bypass all policies
-    const { data, error } = await this.supabaseServiceRole
-      .from('recordings')
-      .select('id, profile_id, title')
-      .limit(10);
-      
-    if (error) {
-      this.logger.error('[RecordingService] DEBUG: Error fetching any recordings:', error.message);
-    } else {
-      this.logger.log(`[RecordingService] DEBUG: Found ${data?.length || 0} total recordings in database`);
-      if (data && data.length > 0) {
-        this.logger.log('[RecordingService] DEBUG: Sample recordings:', JSON.stringify(data.slice(0, 3)));
+    // Check cache first
+    if (this.accessibleProfilesCache.has(cacheKey)) {
+      return this.accessibleProfilesCache.get(cacheKey) as Set<string>;
+    }
+    
+    // Get user's profile
+    const userProfileId = await this.getProfileIdFromUserId(userId);
+    const accessibleProfiles = new Set<string>([userProfileId]);
+    
+    // Get managed profiles if any (family links)
+    try {
+      const { data, error } = await this.supabaseServiceRole
+        .from('family_links')
+        .select('managed_profile_id')
+        .eq('guardian_profile_id', userProfileId);
+        
+      if (!error && data) {
+        data.forEach(link => {
+          accessibleProfiles.add(link.managed_profile_id);
+        });
       }
+      
+      // Cache the result with expiration
+      this.accessibleProfilesCache.set(cacheKey, accessibleProfiles);
+      setTimeout(() => {
+        this.accessibleProfilesCache.delete(cacheKey);
+      }, this.cacheTTL);
+      
+      return accessibleProfiles;
+    } catch (err) {
+      this.logger.error(`Failed to get managed profiles for ${userProfileId}:`, err);
+      return accessibleProfiles; // Return just the user's profile if there's an error
     }
   }
 
   /**
-   * DEBUG METHOD: Test calling get_my_profile_id() using the standard client
-   * TODO: Remove this after debugging
+   * Verify if the user has access to the specified profile
    */
-  async debugTestGetMyProfileId(userId: string): Promise<void> {
-    this.logger.log(`[RecordingService] DEBUG: Testing get_my_profile_id() for user ${userId} using STANDARD client`);
-    // We need the standard client instance, which is this.supabase injected via SUPABASE_CLIENT
-    // This client should be automatically configured with the user's JWT by the time
-    // it reaches the service if the AuthGuard and SupabaseModule are set up correctly.
-    try {
-      // IMPORTANT: Ensure the standard client (this.supabase) is correctly configured
-      // in your SupabaseModule to inherit the user's auth context.
-      const { data, error } = await this.supabase.rpc('get_my_profile_id'); 
+  private async verifyProfileAccess(userId: string, profileIdToAccess: string): Promise<boolean> {
+    const accessibleProfiles = await this.getAccessibleProfileIds(userId);
+    return accessibleProfiles.has(profileIdToAccess);
+  }
 
-      if (error) {
-        this.logger.error('[RecordingService] DEBUG: Error calling get_my_profile_id() via RPC:', error.message);
-      } else {
-        this.logger.log('[RecordingService] DEBUG: Result from get_my_profile_id() via RPC:', data);
-      }
-    } catch (e: any) {
-       this.logger.error('[RecordingService] DEBUG: Exception calling get_my_profile_id() via RPC:', e.message);
+  /**
+   * Verify if the user has access to a recording
+   */
+  private async verifyRecordingAccess(userId: string, recordingId: string): Promise<Recording> {
+    // Get the recording first
+    const { data, error } = await this.supabaseServiceRole
+      .from('recordings')
+      .select('*')
+      .eq('id', recordingId)
+      .maybeSingle();
+      
+    if (error) {
+      throw new InternalServerErrorException('Failed to fetch recording details.');
     }
+    
+    if (!data) {
+      throw new NotFoundException(`Recording with ID ${recordingId} not found.`);
+    }
+    
+    // Now verify if the user has access to this recording's profile
+    const hasAccess = await this.verifyProfileAccess(userId, data.profile_id);
+    if (!hasAccess) {
+      throw new ForbiddenException('You do not have access to this recording.');
+    }
+    
+    return data as Recording;
+  }
+
+  // Helper to generate cache key
+  private getCacheKey(userId: string, type: string): string {
+    return `${type}_${userId}`;
   }
 
   /**
    * Fetches recordings for the authenticated user.
-   * Uses either the standard client (with proper RLS) or the service role client 
-   * based on configuration.
-   * 
-   * NOTE: Once the RLS policies are fixed, set USE_SERVICE_ROLE_FOR_RECORDINGS=false
-   * in your .env file to use the standard client with RLS.
    */
   async getRecordings(userId: string): Promise<Recording[]> {
-    // Remove or comment out the previous debug call
-    // await this.debugTestGetMyProfileId(userId);
-
-    const profileId = await this.getProfileIdFromUserId(userId);
-    this.logger.log(`[RecordingService] Fetching recordings for profile: ${profileId}`);
-
-    // this.logger.log(`[RecordingService] Using SERVICE ROLE client for fetching recordings (Fallback)`);
-    const client = this.supabaseServiceRole; 
+    const cacheKey = this.getCacheKey(userId, 'recordings');
+    
+    // Check cache first
+    const cachedData = this.recordingsCache.get(cacheKey);
+    if (cachedData && (Date.now() - cachedData.timestamp < this.recordingsCacheTTL)) {
+      return cachedData.data;
+    }
+    
+    const accessibleProfiles = await this.getAccessibleProfileIds(userId);
+    const profileIdsArray = Array.from(accessibleProfiles);
 
     try {
-      const { data, error } = await client
+      // Only select fields we need to optimize query performance
+      const { data, error } = await this.supabaseServiceRole
         .from('recordings')
-        .select('*')
-        .eq('profile_id', profileId) 
+        .select('id, profile_id, title, duration, created_at, updated_at, status, error, storage_path')
+        .in('profile_id', profileIdsArray)
         .order('created_at', { ascending: false });
       
       if (error) {
-        this.logger.error(`[RecordingService] Error fetching recordings for profile ${profileId} (Service Role):`, error.message);
         throw new InternalServerErrorException(`Failed to fetch recordings: ${error.message}`);
       }
 
-      this.logger.log(`[RecordingService] Found ${data?.length || 0} recordings for profile ${profileId} (Service Role)`);
-      // this.logger.log(`[RecordingService] Returning data sample (first 3):`, JSON.stringify(data?.slice(0, 3))); // Remove sample logging
+      // Cache the result with expiration
+      this.recordingsCache.set(cacheKey, { 
+        data: data || [],
+        timestamp: Date.now()
+      });
+      
       return data || [];
-
     } catch (catchError: any) {
-      this.logger.error(`[RecordingService] Catch block error during getRecordings (Service Role):`, catchError.message);
-      // Re-throw as an appropriate NestJS exception
-      if (catchError instanceof InternalServerErrorException || catchError instanceof UnauthorizedException || catchError instanceof ForbiddenException) {
+      if (catchError instanceof InternalServerErrorException || 
+          catchError instanceof UnauthorizedException || 
+          catchError instanceof ForbiddenException) {
         throw catchError;
       }
-      throw new InternalServerErrorException(`An unexpected error occurred while fetching recordings: ${catchError.message}`);
+      throw new InternalServerErrorException(`An unexpected error occurred while fetching recordings.`);
     }
   }
 
   /**
    * Fetches a specific recording by its ID for the authenticated user.
-   * Uses the service role client but verifies ownership.
    */
   async getRecordingById(userId: string, recordingId: string): Promise<Recording> {
-    const profileId = await this.getProfileIdFromUserId(userId);
-    this.logger.log(`[RecordingService] Fetching recording ID: ${recordingId} for profile: ${profileId}`);
+    return this.verifyRecordingAccess(userId, recordingId);
+  }
 
-    // Use service role client but enforce profile_id match
-    const { data, error } = await this.supabaseServiceRole
-      .from('recordings')
-      .select('*') // Select all columns for the detail view
-      .eq('id', recordingId)
-      .eq('profile_id', profileId)
-      .maybeSingle(); // Use maybeSingle to handle not found gracefully
-
-    if (error) {
-      this.logger.error(`[RecordingService] Error fetching recording ${recordingId} for profile ${profileId}:`, error.message);
-      // Avoid leaking detailed SQL errors
-      throw new InternalServerErrorException('Failed to fetch recording details.'); 
-    }
-
-    if (!data) {
-      this.logger.warn(`[RecordingService] Recording ${recordingId} not found for profile ${profileId}.`);
-      throw new NotFoundException(`Recording with ID ${recordingId} not found or access denied.`);
-    }
-
-    this.logger.log(`[RecordingService] Found recording ${recordingId}. Status: ${data.status}`);
-    return data as Recording;
+  /**
+   * Invalidate the recordings cache for a user.
+   * Call this whenever a recording is created, updated, or deleted.
+   */
+  private invalidateRecordingsCache(userId: string): void {
+    const cacheKey = this.getCacheKey(userId, 'recordings');
+    this.recordingsCache.delete(cacheKey);
   }
 
   /**
    * Creates metadata and generates a signed URL for upload for the authenticated user.
    */
-  async getUploadUrl(userId: string, title: string, duration: number): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
-    const profileId = await this.getProfileIdFromUserId(userId);
-    const recordingId = uuidv4();
-    const storagePath = `${profileId}/${recordingId}.m4a`;
-
-    this.logger.log(`[RecordingService] Generating upload URL for path: ${storagePath}`);
-
-    const recordingMetadata = await this.createRecordingMetadata(profileId, title, duration, storagePath, recordingId);
-
-    // Use service role client for storage operations
-    const { data: urlData, error: urlError } = await this.supabaseServiceRole.storage
-      .from(this.BUCKET_NAME)
-      .createSignedUploadUrl(storagePath);
-
-    if (urlError) {
-      this.logger.error('[RecordingService] Error generating signed upload URL:', urlError.message);
-      try {
-        // Use internal method, no need to re-fetch profileId
-        await this.updateRecordingStatusInternal(recordingMetadata.id, 'failed', 'Failed to generate upload URL'); 
-      } catch (updateError) {
-        this.logger.error('[RecordingService] Failed to update status after URL generation error:', updateError);
+  async getUploadUrl(userId: string): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
+    try {
+      const profileId = await this.getProfileIdFromUserId(userId);
+      const recordingId = uuidv4();
+      const storagePath = `${profileId}/${recordingId}.m4a`;
+  
+      // Provide default title and 0 duration when creating metadata
+      const defaultTitle = `Recording - ${new Date().toLocaleString()}`;
+      const recordingMetadata = await this.createRecordingMetadata(profileId, defaultTitle, 0, storagePath, recordingId);
+  
+      // Create the signed URL for upload
+      const { data, error } = await this.supabaseServiceRole.storage
+        .from(this.BUCKET_NAME)
+        .createSignedUploadUrl(storagePath);
+  
+      if (error) {
+        throw new InternalServerErrorException(`Failed to create upload URL: ${error.message}`);
       }
-      throw new InternalServerErrorException(`Failed to generate upload URL: ${urlError.message}`);
+  
+      // Invalidate cache when a new recording is created
+      this.invalidateRecordingsCache(userId);
+  
+      return {
+        uploadUrl: data.signedUrl,
+        storagePath,
+        recordingId,
+      };
+    } catch (error) {
+      this.logger.error(`Error in getUploadUrl: ${error.message}`);
+      throw error;
     }
-
-    return { 
-      uploadUrl: urlData.signedUrl, 
-      storagePath, 
-      recordingId: recordingMetadata.id 
-    };
   }
 
   /**
@@ -224,25 +236,27 @@ export class RecordingService {
    * Uses service role client to bypass RLS.
    */
   private async createRecordingMetadata(profileId: string, title: string, duration: number, storagePath: string, recordingId: string): Promise<Recording> {
-    // this.logger.log(`[RecordingService] Creating metadata for recording: ${recordingId}`);
-    // Use the service role client to bypass RLS
+    const now = new Date().toISOString();
+    
     const { data, error } = await this.supabaseServiceRole
       .from('recordings')
       .insert({
         id: recordingId,
         profile_id: profileId,
-        title: title || `Recording ${new Date().toISOString()}`, // Default title
-        duration, // Expect duration in seconds from frontend
+        title: title,
+        duration: duration,
         storage_path: storagePath,
-        status: 'pending_upload', // More specific initial status
+        status: 'pending_upload',
+        created_at: now,
+        updated_at: now
       })
       .select()
       .single();
 
     if (error) {
-      this.logger.error('[RecordingService] Error creating recording metadata:', error.message);
-      throw new InternalServerErrorException(`Failed to create recording metadata: ${error.message}`);
+      throw new InternalServerErrorException(`Failed to create recording metadata`);
     }
+
     return data as Recording;
   }
 
@@ -309,42 +323,43 @@ export class RecordingService {
   }
 
   /**
-   * Updates the status and optionally duration of a recording. Assumes the user has access via the controller/guard.
-   * Uses service role client to bypass RLS.
+   * Internal helper to update recording status without access checks
+   * Used by worker processes and other internal methods
    */
-  private async updateRecordingStatusInternal(recordingId: string, status: string, errorMsg?: string, duration?: number): Promise<Recording> {
-      // this.logger.log(`[RecordingService] Updating status internally for recording ${recordingId} to ${status}${duration ? ` with duration ${duration}s` : ''}`);
-      const updateData: Partial<Recording> & { updated_at: string } = {
-         status,
-         updated_at: new Date().toISOString()
-      };
-      if (errorMsg) {
-        updateData.error = errorMsg;
-      }
-      // Add duration to update if provided and is a valid number
-      if (duration !== undefined && !isNaN(duration)) { 
-          updateData.duration = duration;
-      }
-  
-      // Use service role client to bypass RLS
-      const { data, error } = await this.supabaseServiceRole
-        .from('recordings')
-        .update(updateData)
-        .eq('id', recordingId)
-        .select()
-        .single();
-      
-      if (error) {
-        this.logger.error(`[RecordingService] Error updating internal status for recording ${recordingId}:`, error.message); // Keep error log
-        if (error.code === 'PGRST204') { 
-            throw new NotFoundException(`Recording with ID ${recordingId} not found or access denied (internal update).`);
-        }
-        throw new InternalServerErrorException(`Failed to update internal recording status: ${error.message}`);
-      }
-      if (!data) {
-          throw new NotFoundException(`Recording with ID ${recordingId} not found after internal update attempt.`);
-      }
-      return data as Recording;
+  private async updateRecordingStatusInternal(
+    recordingId: string, 
+    status: string, 
+    errorMsg?: string, 
+    duration?: number
+  ): Promise<Recording> {
+    // Build update object
+    const updateData: any = {
+      status: status,
+      updated_at: new Date().toISOString()
+    };
+    
+    // Add optional fields if provided
+    if (errorMsg !== undefined) {
+      updateData.error = errorMsg;
+    }
+    
+    if (duration !== undefined && duration > 0) {
+      updateData.duration = duration;
+    }
+    
+    // Execute update
+    const { data, error } = await this.supabaseServiceRole
+      .from('recordings')
+      .update(updateData)
+      .eq('id', recordingId)
+      .select()
+      .single();
+    
+    if (error) {
+      throw new InternalServerErrorException(`Failed to update recording status`);
+    }
+    
+    return data as Recording;
   }
 
   /**
@@ -392,81 +407,12 @@ export class RecordingService {
   }
 
   /**
-   * Deletes a recording for the authenticated user.
-   */
-  async deleteRecording(userId: string, recordingId: string): Promise<void> {
-    const profileId = await this.getProfileIdFromUserId(userId);
-    this.logger.log(`[RecordingService] User ${userId} (Profile ${profileId}) attempting to delete recording: ${recordingId}`);
-
-    // Use service role to verify ownership
-    const { data: recordingData, error: fetchError } = await this.supabaseServiceRole
-      .from('recordings')
-      .select('id, storage_path, profile_id')
-      .eq('id', recordingId)
-      .single();
-
-    if (fetchError || !recordingData) {
-      if (fetchError && fetchError.code !== 'PGRST116') { 
-         throw new InternalServerErrorException(`Failed to fetch recording for deletion: ${fetchError.message}`);
-      }
-      if (!recordingData) { 
-           this.logger.log(`[RecordingService] Recording ${recordingId} not found for deletion, assuming already deleted.`);
-           return; 
-      }
-    }    
-    
-    if (recordingData.profile_id !== profileId) {
-       this.logger.warn(`[RecordingService] Profile mismatch for deletion: Requesting Profile ${profileId}, Recording Profile ${recordingData.profile_id}`);
-       throw new ForbiddenException('Access denied to delete this recording.');
-    }
-
-    if (recordingData.storage_path) {
-        // this.logger.log(`[RecordingService] Deleting file from storage: ${recordingData.storage_path}`);
-        // Use service role client for storage operations
-        const { error: storageError } = await this.supabaseServiceRole.storage
-            .from(this.BUCKET_NAME)
-            .remove([recordingData.storage_path]);
-        if (storageError) {
-            this.logger.error(`[RecordingService] Error deleting file ${recordingData.storage_path} from storage: ${storageError.message}. Proceeding with DB deletion.`); // Keep error
-        }
-    } else {
-        this.logger.warn(`[RecordingService] Recording ${recordingId} has no storage path defined, skipping storage deletion.`); // Keep warning
-    }
-
-    // Use service role client to delete the recording record
-    const { error: deleteError } = await this.supabaseServiceRole
-        .from('recordings')
-        .delete()
-        .eq('id', recordingId);
-    
-    if (deleteError) {
-        this.logger.error(`[RecordingService] Error deleting recording ${recordingId} from database:`, deleteError.message); // Keep error
-        throw new InternalServerErrorException(`Failed to delete recording metadata: ${deleteError.message}`);
-    }
-
-    this.logger.log(`[RecordingService] Successfully deleted recording ${recordingId}`); // Keep success log
-  }
-
-  /**
    * Updates the title of a recording.
    */
   async updateRecordingTitle(userId: string, recordingId: string, newTitle: string): Promise<Recording> {
-    const profileId = await this.getProfileIdFromUserId(userId);
-    this.logger.log(`[RecordingService] User ${userId} (Profile ${profileId}) updating title for recording: ${recordingId}`);
-
-    // Verify recording ownership with service role client
-    const { data: checkData, error: checkError } = await this.supabaseServiceRole
-      .from('recordings')
-      .select('id')
-      .eq('id', recordingId)
-      .eq('profile_id', profileId)
-      .maybeSingle();
+    // Verify access first
+    await this.verifyRecordingAccess(userId, recordingId);
     
-    if (checkError || !checkData) {
-      this.logger.error(`[RecordingService] Error verifying recording ownership: ${checkError?.message || 'Recording not found'}`);
-      throw new ForbiddenException('Access denied or recording not found for title update.');
-    }
-
     // Use service role client to update the title
     const { data, error } = await this.supabaseServiceRole
       .from('recordings')
@@ -479,54 +425,94 @@ export class RecordingService {
       .single();
 
     if (error) {
-      this.logger.error(`[RecordingService] Error updating title for recording ${recordingId}:`, error.message); // Keep error
-      throw new InternalServerErrorException(`Failed to update recording title: ${error.message}`);
+      throw new InternalServerErrorException(`Failed to update recording title`);
     }
 
-    this.logger.log(`[RecordingService] Successfully updated title for recording ${recordingId}`); // Keep success log
+    // Invalidate cache when a recording is updated
+    this.invalidateRecordingsCache(userId);
+    
     return data as Recording;
+  }
+
+  /**
+   * Delete a recording and its associated storage file.
+   */
+  async deleteRecording(userId: string, recordingId: string): Promise<void> {
+    // Verify access first and get the recording details
+    const recording = await this.verifyRecordingAccess(userId, recordingId);
+    
+    // Delete from storage if storage_path exists
+    if (recording.storage_path) {
+      try {
+        const { error: storageError } = await this.supabaseServiceRole
+          .storage
+          .from(this.BUCKET_NAME)
+          .remove([recording.storage_path]);
+          
+        if (storageError) {
+          this.logger.warn(`Error removing recording file from storage: ${storageError.message}`);
+          // Continue with database deletion even if storage deletion fails
+        }
+      } catch (storageDeleteError) {
+        this.logger.warn(`Exception during storage deletion: ${storageDeleteError}`);
+        // Continue with database deletion
+      }
+    } else {
+      this.logger.warn(`Recording ${recordingId} has no storage path defined, skipping storage deletion.`);
+    }
+
+    // Use service role client to delete the recording record
+    const { error: deleteError } = await this.supabaseServiceRole
+      .from('recordings')
+      .delete()
+      .eq('id', recordingId);
+    
+    if (deleteError) {
+      throw new InternalServerErrorException(`Failed to delete recording`);
+    }
+    
+    // Invalidate cache when a recording is deleted
+    this.invalidateRecordingsCache(userId);
   }
 
   /**
    * Retry transcription for a recording that previously failed
    */
   async retryTranscription(userId: string, recordingId: string): Promise<Recording> {
-    const profileId = await this.getProfileIdFromUserId(userId);
-    this.logger.log(`[RecordingService] User ${userId} (Profile ${profileId}) requesting transcription retry for recording ${recordingId}`);
-
-    // Verify recording ownership and get storage path (needed for queuing)
-    const { data: recordingData, error: fetchError } = await this.supabaseServiceRole
-      .from('recordings')
-      .select('id, storage_path, profile_id, status') 
-      .eq('id', recordingId)
-      .eq('profile_id', profileId)
-      .maybeSingle();
-
-    if (fetchError || !recordingData) {
-      this.logger.error(`[RecordingService] Error verifying/fetching recording for retry: ${fetchError?.message || 'Recording not found'}`);
-      throw new ForbiddenException('Access denied or recording not found for transcription retry.');
-    }
-
-    if (!recordingData.storage_path) {
-      this.logger.error(`[RecordingService] Recording ${recordingId} is missing storage_path, cannot retry processing.`);
+    // Verify access first and get the recording details
+    const recording = await this.verifyRecordingAccess(userId, recordingId);
+    
+    if (!recording.storage_path) {
       return this.updateRecordingStatusInternal(recordingId, 'failed', 'Internal error: Missing storage path');
     }
 
     // Update status to 'queued' before adding to queue
-    await this.updateRecordingStatusInternal(recordingId, 'queued', undefined);
+    await this.updateRecordingStatusInternal(recordingId, 'queued');
     
     try {
+      const profileId = await this.getProfileIdFromUserId(userId);
+      
       await this.recordingQueue.add('process-recording', {
         recordingId: recordingId,
         profileId: profileId,
-        storagePath: recordingData.storage_path,
+        storagePath: recording.storage_path,
         userId: userId,
+      }, {
+        // Add job options for better reliability
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000, // 5 seconds initial delay
+        },
+        removeOnComplete: true,
+        removeOnFail: false, // Keep failed jobs for debugging
       });
       
-      this.logger.log(`[RecordingService] Successfully queued recording ${recordingId} for transcription retry.`);
+      // Invalidate cache when a recording status changes
+      this.invalidateRecordingsCache(userId);
+      
       return this.getRecordingById(userId, recordingId); // Return fresh data
     } catch (queueError) {
-      this.logger.error(`[RecordingService] Failed to queue recording ${recordingId} for transcription retry:`, queueError);
       return this.updateRecordingStatusInternal(recordingId, 'failed', 'Failed to queue for transcription retry');
     }
   }

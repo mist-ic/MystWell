@@ -10,6 +10,9 @@ import { getRecordingById, deleteRecording, retryTranscription } from '@/service
 import { Recording } from '@/services/recordingService';
 import { useAuth } from '@/context/auth';
 import { Audio } from 'expo-av';
+import * as DocumentPicker from 'expo-document-picker';
+import { useSupabase } from '@/context/SupabaseProvider';
+import * as FileSystem from 'expo-file-system';
 
 interface Medicine {
   id: number;
@@ -20,11 +23,221 @@ interface Medicine {
   timing: string;
 }
 
+// Wrap StyleSheet.create in a function that accepts theme
+const createStyles = (theme: any) => StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  headerContainer: {
+    paddingTop: 16,
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  playerCard: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    elevation: 2,
+  },
+  playerInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  date: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+  },
+  duration: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+  },
+  playerControls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 24,
+  },
+  playButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+    backgroundColor: theme.colors.primaryContainer,
+  },
+  seekButton: {
+    padding: 8,
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 2,
+  },
+  progress: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: theme.colors.primary,
+  },
+  section: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    elevation: 2,
+    backgroundColor: theme.colors.surface,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: theme.colors.onSurface,
+  },
+  sectionContent: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: theme.colors.onSurfaceVariant,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
+    marginHorizontal: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    minHeight: '50%',
+    maxHeight: '90%',
+    padding: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.outlineVariant,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+    color: theme.colors.onBackground,
+  },
+  closeButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  medicineItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.outlineVariant,
+  },
+  medDetailScroll: {
+    flex: 1,
+  },
+  medDetailCard: {
+    marginBottom: 16,
+  },
+  medDetailSection: {
+    fontSize: 16,
+    marginBottom: 12,
+    lineHeight: 24,
+    color: theme.colors.onSurfaceVariant,
+  },
+  medDetailLabel: {
+    fontWeight: '600',
+    fontSize: 16,
+    color: theme.colors.onSurface,
+  },
+  sideEffect: {
+    fontSize: 16,
+    lineHeight: 24,
+    marginLeft: 8,
+    marginTop: 4,
+    color: theme.colors.onSurfaceVariant,
+  },
+  card: {
+    marginBottom: 16,
+  },
+  analysisSection: {
+    marginBottom: 16,
+  },
+  analysisLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: theme.colors.onSurface,
+  },
+  analysisValue: {
+    fontSize: 16,
+    marginBottom: 8,
+    color: theme.colors.onSurfaceVariant,
+  },
+  bulletItem: {
+    fontSize: 16,
+    marginLeft: 16,
+    marginBottom: 4,
+    color: theme.colors.onSurfaceVariant,
+  },
+  showTranscriptContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.outlineVariant,
+  },
+  transcriptText: {
+    fontSize: 14,
+    color: theme.colors.onSurfaceVariant,
+    marginTop: 8,
+  },
+  dialogTitle: {
+    textAlign: 'center',
+    color: theme.colors.onSurface,
+  },
+  uploadButton: {
+    marginTop: 10,
+  },
+  documentInfoContainer: {
+    padding: 10,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 4,
+    marginBottom: 10,
+  },
+  documentInfoText: {
+    fontSize: 14,
+    marginBottom: 4,
+    color: theme.colors.onSurfaceVariant,
+  },
+});
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
+
 export default function RecordingDetailScreen() {
   const theme = useTheme();
+  const styles = createStyles(theme);
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
+  const { supabase } = useSupabase();
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMedsModalVisible, setIsMedsModalVisible] = useState(false);
   const [selectedMed, setSelectedMed] = useState<Medicine | null>(null);
@@ -32,10 +245,12 @@ export default function RecordingDetailScreen() {
   const [recordingData, setRecordingData] = useState<Recording | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarType, setSnackbarType] = useState<'info' | 'error' | 'success'>('info');
+  const [selectedDocument, setSelectedDocument] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [confirmDialogVisible, setConfirmDialogVisible] = useState(false);
@@ -240,11 +455,114 @@ export default function RecordingDetailScreen() {
     }
   };
 
-  if (isLoading || isDeleting) {
+  const updateRecordingDocumentPath = async (recordingId: string, documentPath: string): Promise<void> => {
+    const token = session?.access_token;
+    if (!token) {
+      throw new Error('Authentication required to update recording.');
+    }
+    console.log(`[Placeholder] Updating recording ${recordingId} with document path: ${documentPath}`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    console.log(`[Placeholder] Successfully updated recording ${recordingId}`);
+  };
+
+  const pickDocument = async () => {
+    if (!supabase || !session?.user || !id) {
+      showSnackbar('Cannot upload document: Missing necessary context (Supabase/User/ID)', 'error');
+      return;
+    }
+    if (isUploading) {
+        showSnackbar('Upload already in progress.', 'info');
+        return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+
+      console.log("Document Picker Result:", result);
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setSelectedDocument(asset);
+        setIsUploading(true);
+        showSnackbar('Uploading document...', 'info');
+
+        const userId = session.user.id;
+        const recordingId = Array.isArray(id) ? id[0] : id;
+        const fileName = asset.name;
+        const filePath = `public/${userId}/${recordingId}/${fileName}`;
+        const fileUri = asset.uri;
+        const fileMimeType = asset.mimeType || 'application/octet-stream';
+
+        try {
+          const base64 = await FileSystem.readAsStringAsync(fileUri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          
+          const byteCharacters = atob(base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const fileBlob = new Blob([byteArray], { type: fileMimeType });
+
+          console.log(`Uploading to Supabase path: ${filePath} with type: ${fileMimeType}`);
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('documents')
+            .upload(filePath, fileBlob, {
+              contentType: fileMimeType,
+              upsert: true,
+            });
+
+          if (uploadError) {
+            console.error('Supabase upload error:', uploadError);
+            throw new Error(`Supabase upload failed: ${uploadError.message}`);
+          }
+
+          console.log('Supabase upload successful:', uploadData);
+          const uploadedPath = uploadData?.path;
+
+          if (!uploadedPath) {
+              throw new Error('Upload succeeded but path was not returned from Supabase.');
+          }
+
+          await updateRecordingDocumentPath(recordingId, uploadedPath);
+
+          showSnackbar('Document uploaded and linked successfully!', 'success');
+          fetchLatestRecordingData();
+
+        } catch (uploadError) {
+          console.error('Error during document upload or update:', uploadError);
+          showSnackbar(uploadError instanceof Error ? uploadError.message : 'Failed to upload document', 'error');
+        } finally {
+          setIsUploading(false);
+        }
+
+      } else {
+        showSnackbar('Document selection cancelled', 'info');
+        setSelectedDocument(null);
+      }
+    } catch (error) {
+      console.error('Error picking document:', error);
+      showSnackbar(error instanceof Error ? error.message : 'Failed to pick document', 'error');
+      setSelectedDocument(null);
+      setIsUploading(false);
+    }
+  };
+
+  if (isLoading || isDeleting || isUploading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" animating={true} color={theme.colors.primary} />
-        <Text style={{ marginTop: 10 }}>{isDeleting ? 'Deleting Recording...' : 'Loading Recording...'}</Text>
+        <Text style={{ marginTop: 10 }}>
+          {isDeleting ? 'Deleting Recording...' : 
+           isUploading ? 'Uploading Document...' :
+           'Loading Recording...'}
+        </Text>
       </SafeAreaView>
     );
   }
@@ -306,9 +624,13 @@ export default function RecordingDetailScreen() {
     );
   }
 
+  const isProcessing = ['queued', 'processing', 'transcribing_completed'].includes(recordingData.status);
+
+  const canUploadDocument = supabase && session?.user && id && !isUploading;
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar style="dark" />
+      <StatusBar style={Platform.OS === 'ios' ? 'light' : theme.dark ? 'light' : 'dark'} />
       <View style={styles.headerContainer}>
         <AppHeader 
           title={recordingData.title || 'Recording Detail'} 
@@ -466,6 +788,40 @@ export default function RecordingDetailScreen() {
             )}
           </Card.Content>
         </Card>
+
+        <Card style={styles.card}>
+          <Card.Title title="Related Documents" />
+          <Card.Content>
+            {recordingData.document_path ? (
+              <View style={{ marginTop: 10 }}>
+                <Text>Associated Document:</Text>
+                <TouchableOpacity onPress={() => console.log("TODO: Open document link")}>
+                  <Text style={{ color: theme.colors.primary, textDecorationLine: 'underline' }}>
+                    {recordingData.document_path.split('/').pop()}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : selectedDocument ? (
+              <View style={{ marginTop: 10 }}>
+                <Text>Selected: {selectedDocument.name} ({selectedDocument.size ? (selectedDocument.size / 1024).toFixed(2) + ' KB' : 'size unknown'})</Text>
+              </View>
+            ) : (
+              <Text style={{ fontStyle: 'italic', color: theme.colors.outline, marginTop: 5 }}>
+                  No document attached.
+              </Text>
+            )}
+            <Button 
+              mode="outlined" 
+              onPress={pickDocument} 
+              icon="paperclip" 
+              style={{ marginTop: 15 }}
+              disabled={!canUploadDocument}
+              loading={isUploading}
+            >
+              {recordingData.document_path ? "Replace Document" : "Attach Document"}
+            </Button>
+          </Card.Content>
+        </Card>
       </ScrollView>
 
       <Portal>
@@ -592,183 +948,4 @@ export default function RecordingDetailScreen() {
 
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  headerContainer: {
-    paddingTop: 16,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-  },
-  playerCard: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    elevation: 2,
-  },
-  playerInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  date: {
-    fontSize: 14,
-    color: '#666',
-  },
-  duration: {
-    fontSize: 14,
-    color: '#666',
-  },
-  playerControls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    gap: 24,
-  },
-  playButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 2,
-  },
-  seekButton: {
-    padding: 8,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
-  },
-  progress: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  section: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    elevation: 2,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  sectionContent: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#333',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    minHeight: '50%',
-    maxHeight: '90%',
-    padding: 16,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'center',
-  },
-  closeButton: {
-    padding: 8,
-    marginLeft: 8,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  medicineItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  medDetailScroll: {
-    flex: 1,
-  },
-  medDetailCard: {
-    marginBottom: 16,
-  },
-  medDetailSection: {
-    fontSize: 16,
-    marginBottom: 12,
-    lineHeight: 24,
-  },
-  medDetailLabel: {
-    fontWeight: '600',
-    fontSize: 16,
-    color: '#333',
-  },
-  sideEffect: {
-    fontSize: 16,
-    lineHeight: 24,
-    marginLeft: 8,
-    marginTop: 4,
-  },
-  card: {
-    marginBottom: 16,
-  },
-  analysisSection: {
-    marginBottom: 16,
-  },
-  analysisLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  analysisValue: {
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  bulletItem: {
-    fontSize: 16,
-    marginLeft: 16,
-    marginBottom: 4,
-  },
-  showTranscriptContainer: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  transcriptText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  dialogTitle: {
-    textAlign: 'center',
-  },
-}); 
+} 

@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Platform, ListRenderItem, ActivityIndicator, Alert } from 'react-native';
-import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog, Searchbar, SegmentedButtons } from 'react-native-paper';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { View, StyleSheet, FlatList, TouchableOpacity, Platform, ListRenderItem, ActivityIndicator, Alert, SectionList, ScrollView } from 'react-native';
+import { Text, useTheme, TextInput, Button, Menu, Snackbar, Modal, Portal, Divider, Dialog, Searchbar, SegmentedButtons, Surface, Badge, IconButton, Chip } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -11,11 +11,14 @@ import { AudioWaveform } from '@/components/AudioWaveform';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '../../context/auth';
 import { deleteRecording } from '../../services/recordingService';
+import { supabase } from '@/lib/supabase';
+import { useUserProfile } from '@/hooks/useUserProfile';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
 // const API_BASE_URL = 'http://172.31.231.222:3000'; // Use the provided IP and default port
-const API_BASE_URL = 'https://mystwell.me';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
 
 // --- Types ---
 // Define Recording type based on backend structure
@@ -34,6 +37,8 @@ export interface Recording {
   metadata?: any;
   // Frontend-specific temporary state
   isPlaying?: boolean;
+  // Added for UI categorization
+  category?: 'Appointment' | 'Reminder' | 'Other';
 }
 
 interface RecordingItemProps {
@@ -41,16 +46,158 @@ interface RecordingItemProps {
   currentlyPlayingId: string | null;
   setCurrentlyPlayingId: (id: string | null) => void;
   showDeleteConfirmDialog: (id: string, title: string) => void;
+  setSnackbarMessage: (message: string) => void;
+  setSnackbarVisible: (visible: boolean) => void;
 }
+
+interface RecordingSection {
+  title: string;
+  data: Recording[];
+}
+
+// --- Utility Functions ---
+
+// Format a date for display in recording items - updated for better readability
+const formatItemDate = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString(undefined, { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return '';
+  }
+};
+
+// Format a date for display in section headers - updated to show "Today"/"Yesterday"
+const formatSectionDate = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+  } catch {
+    return '';
+  }
+};
+
+// Format duration for display
+const formatDuration = (seconds: number): string => {
+  if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+// Group recordings by date
+const groupRecordingsByDate = (recordings: Recording[]): RecordingSection[] => {
+  // Sort recordings by date (newest first)
+  const sortedRecordings = [...recordings].sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  
+  // Group by date
+  const groupedRecordings: { [key: string]: Recording[] } = {};
+  
+  sortedRecordings.forEach(recording => {
+    try {
+      const date = new Date(recording.created_at);
+      const dateString = date.toDateString(); // Use date string as key
+      
+      if (!groupedRecordings[dateString]) {
+        groupedRecordings[dateString] = [];
+      }
+      
+      groupedRecordings[dateString].push(recording);
+    } catch (error) {
+      console.error('Error grouping recording by date:', error);
+    }
+  });
+  
+  // Convert to sections array
+  return Object.entries(groupedRecordings).map(([dateString, recordings]) => ({
+    title: formatSectionDate(dateString),
+    data: recordings
+  }));
+};
+
+// Categorize recordings (for demonstration purposes - replace with actual logic)
+const categorizeRecording = (recording: Recording): Recording => {
+  const title = recording.title?.toLowerCase() || '';
+  const transcript = recording.transcription?.toLowerCase() || '';
+  
+  // Simple categorization logic based on title or transcript content
+  // In a real app, this would use more sophisticated NLP or metadata
+  if (title.includes('appointment') || title.includes('doctor') || transcript.includes('appointment')) {
+    return { ...recording, category: 'Appointment' };
+  } else if (title.includes('reminder') || transcript.includes('remind')) {
+    return { ...recording, category: 'Reminder' };
+  } else {
+    return { ...recording, category: 'Other' };
+  }
+};
+
+// Get status information for a recording - Update to use shorter display labels
+const getRecordingStatus = (status: string): { color: string; icon: string; backgroundColor: string } => {
+  switch (status) {
+    case 'completed':
+      return { 
+        color: '#FFFFFF', 
+        icon: 'check-circle', 
+        backgroundColor: '#10B981' 
+      };
+    case 'processing':
+    case 'transcribing_completed':
+    case 'queued':
+    case 'pending_upload':
+    case 'uploaded':
+      return { 
+        color: '#FFFFFF', 
+        icon: 'progress-clock', 
+        backgroundColor: '#EAB308' // Changed to yellow
+      };
+    case 'failed':
+    case 'transcription_failed':
+    case 'analysis_failed':
+    case 'download_failed':
+      return { 
+        color: '#FFFFFF', 
+        icon: 'alert-circle', 
+        backgroundColor: '#EF4444' 
+      };
+    default:
+      return { 
+        color: '#FFFFFF', 
+        icon: 'clock-outline', 
+        backgroundColor: '#6B7280' 
+      };
+  }
+};
 
 // --- Components ---
 
-// Recording Item Component (Adapted for backend data)
+// Recording Item Component
 const RecordingItem: React.FC<RecordingItemProps> = React.memo(({ 
     recording, 
     currentlyPlayingId, 
     setCurrentlyPlayingId,
-    showDeleteConfirmDialog
+    showDeleteConfirmDialog,
+    setSnackbarMessage,
+    setSnackbarVisible
 }) => {
   const theme = useTheme();
   const router = useRouter();
@@ -61,8 +208,13 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const { session } = useAuth();
   const soundRef = useRef<Audio.Sound | null>(null);
+  const [isReTranscribing, setIsReTranscribing] = useState(false);
+  const menuRef = useRef<View>(null);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
 
   const isPlaying = currentlyPlayingId === recording.id;
+  const status = getRecordingStatus(recording.status);
+  const category = recording.category || 'Other';
 
   // Function to unload the sound safely
   const unloadSound = useCallback(async () => {
@@ -110,55 +262,46 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
       }
       
       console.log("Title updated successfully for:", recording.id);
-    setIsEditModalVisible(false);
+      // Update local state through the callbacks passed in props
+      setSnackbarMessage(`Renamed recording to "${editedTitle}"`);
+      setSnackbarVisible(true);
+      // Close modal after success
+      setIsEditModalVisible(false);
     } catch (error: any) {
       console.error("Error updating title:", error);
       Alert.alert("Error", error.message || "Failed to update recording name.");
     } finally {
       setIsUpdating(false);
     }
-  }, [recording.id, recording.title, editedTitle, session]);
+  }, [recording.id, recording.title, editedTitle, session, setSnackbarMessage, setSnackbarVisible]);
 
   const handleRecordingPress = useCallback(() => {
-    // Navigate to detail screen, passing only the ID
-    // The detail screen will fetch full details using the ID
+    // Navigate to detail screen
     router.push({
       pathname: `/recording/[id]`, 
-      params: { id: recording.id } // Pass only ID
+      params: { id: recording.id }
     });
   }, [recording.id, router]);
 
-  // Playback Handler
   const handlePlayPause = useCallback(async () => {
     if (!session) {
       Alert.alert("Authentication Required", "Please log in to play recordings.");
       return;
     }
 
-    if (isLoadingPlayback) return; // Prevent double taps while loading
+    if (isLoadingPlayback) return; // Prevent multiple clicks while loading
 
-    // If this item is already playing, stop it
+    // If this recording is already playing, stop it
     if (isPlaying) {
-      console.log("Stopping playback for:", recording.id);
-      setIsLoadingPlayback(true);
-      await unloadSound();
+      // Cancel action
       setCurrentlyPlayingId(null);
-      setIsLoadingPlayback(false);
+      await unloadSound();
       return;
     }
-
-    // Stop any other currently playing sound before starting new one
-    if (currentlyPlayingId && currentlyPlayingId !== recording.id) {
-         console.log("Stopping previous sound before playing new one.");
-         // We rely on the main component to handle stopping the *other* sound instance
-         setCurrentlyPlayingId(recording.id); // Signal intent to play this one
-         // Ideally, the parent component would have a way to directly stop the other soundRef
-         // For now, setting the ID will cause the other item to stop in its own effect/logic
-    } else {
-        setCurrentlyPlayingId(recording.id);
-    }
-
+    
+    // Stop any other playing recording first
     setIsLoadingPlayback(true);
+    setCurrentlyPlayingId(recording.id);
 
     try {
       console.log("Requesting playback URL for:", recording.id);
@@ -205,120 +348,233 @@ const RecordingItem: React.FC<RecordingItemProps> = React.memo(({
     } finally {
       setIsLoadingPlayback(false);
     }
-  }, [recording.id, session, isPlaying, currentlyPlayingId, setCurrentlyPlayingId, isLoadingPlayback]);
+  }, [recording.id, session, isPlaying, currentlyPlayingId, setCurrentlyPlayingId, isLoadingPlayback, unloadSound]);
 
-  // --- Modified Delete Handler: Trigger Parent Dialog --- 
+  // Delete Handler
   const handleDeleteRequest = useCallback(() => {
-    // console.log(`[List Item ${recording.id}] handleDeleteRequest called`);
     setMenuVisible(false); 
     showDeleteConfirmDialog(recording.id, recording.title || 'this recording');
   }, [recording.id, recording.title, showDeleteConfirmDialog]);
-  // --- End Modified Delete Handler ---
 
-  const formatDate = (dateString: string) => {
-    try {
-        // Use more user-friendly formatting
-        return new Date(dateString).toLocaleDateString(undefined, { 
-            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+  const openMenu = () => {
+    if (menuRef.current) {
+      menuRef.current.measureInWindow((x, y, width, height) => {
+        setMenuPosition({ 
+          x: x + width - 8, 
+          y: y + height + 4 
         });
-    } catch {
-        return dateString; // Fallback
+        setMenuVisible(true);
+      });
+    } else {
+      setMenuVisible(true); // Fallback if ref not available
     }
-  }
+  };
   
-  const formatDuration = (seconds: number) => {
-      if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-
-  const openMenu = () => setMenuVisible(true);
   const closeMenu = () => setMenuVisible(false);
 
+  // Get the appropriate icon for the recording category
+  const getCategoryIcon = () => {
+    switch (category) {
+      case 'Appointment':
+        return 'calendar';
+      case 'Reminder':
+        return 'bell';
+      default:
+        return 'text-box-outline';
+    }
+  };
+
+  // Get the appropriate background color for the icon container
+  const getCategoryColor = () => {
+    switch (category) {
+      case 'Appointment':
+        return '#EFF6FF';
+      case 'Reminder':
+        return '#FEF3C7';
+      default:
+        return '#F3F4F6';
+    }
+  };
+
+  // Handle Re-transcribe function
+  const handleReTranscribe = useCallback(async () => {
+    if (!session?.user) {
+      router.push("/login");
+      return;
+    }
+    
+    setIsReTranscribing(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/recordings/${recording.id}/retranscribe`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to re-transcribe recording');
+      }
+      
+      setSnackbarMessage('Re-transcription started. This may take a moment.');
+      setSnackbarVisible(true);
+    } catch (error) {
+      console.error('Error re-transcribing:', error);
+      setSnackbarMessage('Failed to re-transcribe recording.');
+      setSnackbarVisible(true);
+    } finally {
+      setIsReTranscribing(false);
+      closeMenu();
+    }
+  }, [recording.id, session, router, setSnackbarMessage, setSnackbarVisible, closeMenu]);
+
+  // Extract just the time without date for display
+  const timeOnly = formatItemDate(recording.created_at);
+  const durationText = formatDuration(recording.duration || 0);
+  
   return (
-    <TouchableOpacity 
-      style={[styles.itemContainer, { backgroundColor: theme.colors.surfaceVariant }]}
-      onPress={handleRecordingPress}
-      disabled={isUpdating}
+    <Surface 
+      style={[styles.cardContainer, { backgroundColor: '#FFFFFF' }]} 
+      elevation={1}
     >
-      <View style={styles.itemContentContainer}>
-        <TouchableOpacity onPress={handlePlayPause} disabled={isLoadingPlayback} style={styles.playButton}>
+      <TouchableOpacity 
+        style={styles.cardContent}
+        onPress={handleRecordingPress}
+        disabled={isUpdating}
+      >
+        {/* Left Section (Icon and Play) */}
+        <TouchableOpacity
+          style={[styles.iconContainer, { backgroundColor: getCategoryColor() }]}
+          onPress={handlePlayPause}
+          disabled={isLoadingPlayback}
+          hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+        >
           {isLoadingPlayback ? (
             <ActivityIndicator size="small" color={theme.colors.primary} />
           ) : (
-            <MaterialCommunityIcons 
-              name={isPlaying ? "pause-circle" : "play-circle"} 
-              size={36} 
-              color={theme.colors.primary}
-            />
+            <>
+              <MaterialCommunityIcons 
+                name={getCategoryIcon()} 
+                size={16} 
+                color="#4F46E5"
+                style={styles.categoryIcon}
+              />
+              <MaterialCommunityIcons 
+                name={isPlaying ? "pause" : "play"} 
+                size={20} 
+                color="#4F46E5"
+                style={styles.playIcon}
+              />
+            </>
           )}
         </TouchableOpacity>
-
-        <View style={styles.itemTextContainer}>
-          <Text variant="titleMedium" numberOfLines={1} style={styles.itemTitle}>
+        
+        {/* Middle Section (Text) */}
+        <View style={styles.textContainer}>
+          <Text style={styles.titleText} numberOfLines={1}>
             {recording.title || 'Untitled Recording'}
           </Text>
-          <Text variant="bodySmall" style={styles.itemDetail}>
-            {formatDate(recording.created_at)} • {formatDuration(recording.duration ?? 0)} • {recording.status}
+          <Text style={styles.metaText}>
+            {timeOnly} • {durationText}
           </Text>
         </View>
-
-        {isUpdating && (
-          <ActivityIndicator size="small" color={theme.colors.primary} style={styles.itemLoadingIndicator || { marginLeft: 8 }} />
-        )}
-
+        
+        {/* Right Section (Status and Menu) */}
+        <View style={styles.rightSection}>
+          {isUpdating ? (
+            <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 8 }} />
+          ) : (
+            <View style={[styles.statusIconContainer, { backgroundColor: status.backgroundColor }]}>
+              <MaterialCommunityIcons 
+                name={status.icon as keyof typeof MaterialCommunityIcons.glyphMap} 
+                size={14} 
+                color={status.color} 
+              />
+            </View>
+          )}
+          
+          <View ref={menuRef}>
+            <IconButton
+              icon="dots-vertical"
+              size={24}
+              onPress={openMenu}
+              iconColor="#6B7280"
+              style={styles.menuButton}
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+      
+      {/* Add Portal for Menu */}
+      <Portal>
         <Menu
           visible={menuVisible}
           onDismiss={closeMenu}
-          anchor={
-            <TouchableOpacity onPress={openMenu} style={styles.menuButton} disabled={isUpdating}>
-              <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.colors.onSurfaceVariant} />
-            </TouchableOpacity>
-          }
-          anchorPosition="bottom"
+          anchor={menuPosition}
+          contentStyle={{ backgroundColor: 'white' }}
         >
           <Menu.Item 
-            onPress={() => { closeMenu(); setIsEditModalVisible(true); }} 
+            onPress={() => {
+              closeMenu();
+              setIsEditModalVisible(true);
+            }} 
             title="Rename" 
-            leadingIcon="pencil-outline"
+            leadingIcon="pencil"
           />
-          <Divider />
           <Menu.Item 
-            onPress={handleDeleteRequest} 
+            onPress={() => {
+              closeMenu();
+              handleReTranscribe();
+            }} 
+            title="Re-transcribe" 
+            leadingIcon="refresh"
+            disabled={isReTranscribing}
+          />
+          <Menu.Item 
+            onPress={() => {
+              closeMenu();
+              handleDeleteRequest();
+            }} 
             title="Delete" 
-            leadingIcon="delete-outline" 
-            titleStyle={{ color: theme.colors.error }}
+            leadingIcon="delete"
           />
         </Menu>
-      </View>
-
+      </Portal>
+      
+      {/* Edit Modal */}
       <Portal>
-        <Modal visible={isEditModalVisible} onDismiss={() => setIsEditModalVisible(false)} contentContainerStyle={[styles.modalContainer, {backgroundColor: theme.colors.background}]}>
-          <Text variant="headlineSmall" style={styles.modalTitle}>Rename Recording</Text>
+        <Modal
+          visible={isEditModalVisible}
+          onDismiss={() => setIsEditModalVisible(false)}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
+        >
+          <Text style={[styles.modalTitle, { color: theme.colors.onSurface }]}>Edit Recording Title</Text>
           <TextInput
-            label="New Title"
             value={editedTitle}
             onChangeText={setEditedTitle}
             mode="outlined"
             style={styles.input}
+            disabled={isUpdating}
           />
           <View style={styles.modalActions}>
-            <Button onPress={() => setIsEditModalVisible(false)}>Cancel</Button>
-            <Button 
-              mode="contained" 
-              onPress={handleSaveTitle} 
-              loading={isUpdating} 
-              disabled={isUpdating || !editedTitle || editedTitle === recording.title}
-            >
-              Save
-            </Button>
+            <Button onPress={() => setIsEditModalVisible(false)} disabled={isUpdating}>Cancel</Button>
+            <Button onPress={handleSaveTitle} mode="contained" loading={isUpdating} disabled={isUpdating}>Save</Button>
           </View>
         </Modal>
       </Portal>
-    </TouchableOpacity>
+    </Surface>
   );
 });
+
+// Section Header Component for Date Grouping
+const SectionHeader: React.FC<{ title: string }> = ({ title }) => {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderText}>{title}</Text>
+    </View>
+  );
+};
 
 // Main Screen Component
 export default function RecordScreen() {
@@ -331,146 +587,79 @@ export default function RecordScreen() {
 
 function RecordScreenContent() {
   const theme = useTheme();
-  const { session } = useAuth(); // Get session for auth token
+  const router = useRouter();
+  const { session } = useAuth(); // Keep using session for auth checks
+  const { profile, loading: profileLoading, error: profileError } = useUserProfile(); // Get profile info
 
-  // Input State
-  const [recordingTitle, setRecordingTitle] = useState(''); // State for title input
-
-  // Recording State
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Recording UI State
   const [isRecording, setIsRecording] = useState(false);
-  const [isSaving, setIsSaving] = useState(false); 
   const [recordingTime, setRecordingTime] = useState('00:00');
   const [audioLevel, setAudioLevel] = useState(0);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  
+  // Recording Logic State/Refs
+  const [recordingInstance, setRecordingInstance] = useState<Audio.Recording | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<Audio.RecordingStatus | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  // Store upload info needed by stopRecording
   const activeUploadInfo = useRef<{ recordingId: string; storagePath: string; uploadUrl: string } | null>(null);
-
-  // List State
-  const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [isLoadingList, setIsLoadingList] = useState(true);
-  const [listError, setListError] = useState<string | null>(null);
   
-  // Snackbar State
+  // List State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false); // Re-add state for delete operation
+  
+  // Delete Confirmation State
+  const [isConfirmDialogVisible, setIsConfirmDialogVisible] = useState(false);
+  const [recordingToDelete, setRecordingToDelete] = useState<{ id: string; title: string } | null>(null);
+
+  // Snackbar state
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
-  // Playback State
-  const [currentlyPlayingId, setCurrentlyPlayingId] = useState<string | null>(null);
+  // Refs
+  const recordingUpdateChannel = useRef<RealtimeChannel | null>(null);
 
-  // --- Dialog State (New) ---
-  const [confirmDialogVisible, setConfirmDialogVisible] = useState(false);
-  const [recordingToDelete, setRecordingToDelete] = useState<{id: string; title: string} | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false); // Add deleting state here
-
-  const showDeleteConfirmDialog = useCallback((id: string, title: string) => {
-    // console.log(`[RecordScreen] showDeleteConfirmDialog called for ID: ${id}, Title: ${title}`);
+  // --- Handlers ---
+  const showConfirmDialog = (id: string, title: string) => {
     setRecordingToDelete({ id, title });
-    setConfirmDialogVisible(true);
-  }, []);
+    setIsConfirmDialogVisible(true);
+  };
 
   const hideConfirmDialog = () => {
-    setConfirmDialogVisible(false);
+    setIsConfirmDialogVisible(false);
     setRecordingToDelete(null);
   };
 
-  // --- API Interaction ---
-
-  const fetchRecordings = useCallback(async () => {
-    if (!session) {
-      // Don't show error if simply not logged in, just show empty state
-      // setListError("Not authenticated"); 
-      setIsLoadingList(false);
-      setRecordings([]); 
-      return;
-    }
-    
-    setIsLoadingList(true);
-    setListError(null);
-    console.log("Fetching recordings...");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/recordings`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (!response.ok) {
-        let errorMsg = `HTTP error! status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            errorMsg = errorData.message || errorMsg;
-        } catch (e) { /* ignore json parse error */ }
-        throw new Error(errorMsg);
-      }
-
-      const data: Recording[] = await response.json();
-      // Add isPlaying state locally if needed for UI
-      console.log("Raw API response:", JSON.stringify(data));
-      setRecordings(data.map(r => ({ ...r, isPlaying: false }))); 
-      console.log("Recordings fetched:", data.length);
-    } catch (error: any) {
-      console.error("Error fetching recordings:", error);
-      setListError(error.message || "Failed to fetch recordings.");
-      setRecordings([]); // Clear recordings on error
-    } finally {
-      setIsLoadingList(false);
-    }
-  }, [session]);
-
-  // Fetch recordings on mount or when session changes
-  useEffect(() => {
-    fetchRecordings();
-
-    // Cleanup timer on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      // Stop and unload recording if component unmounts while recording
-      if (recordingRef.current) {
-         console.log("Unloading active recording on unmount...");
-         recordingRef.current.stopAndUnloadAsync().catch(err => console.error("Error unloading recording on unmount:", err));
-         recordingRef.current = null;
-      }
-    };
-  }, [fetchRecordings]); // Re-fetch when fetchRecordings dependency (session) changes
-
-  // Update recording status via API
-  const updateApiRecordingStatus = async (recordingId: string, status: string, errorMsg?: string, duration?: number) => {
-      if (!session) return;
-      console.log(`Updating API status for ${recordingId} to ${status}${duration ? ` with duration ${duration}s` : ''}`);
+  const handleDeleteConfirm = async () => {
+    if (recordingToDelete && session) {
+      setIsDeleting(true); // Set deleting state
       try {
-          const response = await fetch(`${API_BASE_URL}/recordings/${recordingId}/status`, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ status, error: errorMsg, duration }),
-          });
-          if (!response.ok) {
-              let errorDetail = `Status update failed: ${response.status}`;
-              try {
-                  const errorData = await response.json();
-                  errorDetail = errorData.message || errorDetail;
-              } catch (e) {} 
-              throw new Error(errorDetail);
-          }
-          console.log(`Status updated successfully for ${recordingId}`);
-          // Refresh list after status update
-          fetchRecordings(); 
-      } catch (error: any) {
-          console.error(`Failed to update status to ${status} for ${recordingId}:`, error);
-          setSnackbarMessage(`Error updating status: ${error.message}`);
-          setSnackbarVisible(true);
+        await deleteRecording(recordingToDelete.id, session.access_token);
+        setRecordings(prev => prev.filter(rec => rec.id !== recordingToDelete.id));
+        setSnackbarMessage(`Deleted "${recordingToDelete.title}"`);
+        setSnackbarVisible(true);
+      } catch (err: any) {
+        console.error("Error deleting recording:", err);
+        setError(err.message || 'Failed to delete recording');
+      } finally {
+        setIsDeleting(false); // Unset deleting state
+        hideConfirmDialog();
       }
+    } else {
+      setError('Authentication required to delete.');
+      hideConfirmDialog();
+    }
   };
 
-  // --- Recording Logic ---
-
-  // Timer Update
+  const onSnackbarDismiss = () => setSnackbarVisible(false);
   const updateTimer = useCallback(() => {
     if (!startTimeRef.current) return;
     const now = new Date();
@@ -481,404 +670,601 @@ function RecordScreenContent() {
     setRecordingTime(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
   }, []);
 
-  // Start Recording Process
-  const startRecording = async () => {
+  // --- Data Fetching and Updates ---
+  const fetchRecordings = useCallback(async () => {
+    console.log("Fetching recordings...");
     if (!session) {
-      setSnackbarMessage('Please log in to record.');
-      setSnackbarVisible(true);
+      setError("Authentication required.");
+      setIsLoading(false);
       return;
     }
-    if (isRecording || isLoadingList || isSaving) return; // Prevent starting if busy
-
-    setIsLoadingList(true); // Use list loading indicator for setup phase
-    setListError(null);
-    activeUploadInfo.current = null; // Reset previous upload info
-    let createdRecordingId: string | null = null;
-
+    setIsLoading(true);
+    setError(null);
     try {
-      // 1. Request Mic Permissions (Platform Specific)
-      console.log('Requesting permissions...');
-      let permissionGranted = false;
-      if (Platform.OS === 'web') {
-          try {
-              // Use standard Web API for permissions
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              // We don't need the stream itself for Expo AV, just need the permission grant.
-              // Important: Stop the tracks immediately to release the microphone indicator if Expo AV doesn't handle it.
-              stream.getTracks().forEach(track => track.stop());
-              permissionGranted = true;
-              console.log('Web microphone permission granted.');
-          } catch (err) {
-              console.error("Web microphone permission denied:", err);
-              throw new Error('Microphone permission is required');
-          }
-      } else {
-          // Use Expo API for native
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-              throw new Error('Microphone permission is required');
-          }
-          permissionGranted = true;
-           console.log('Native microphone permission granted.');
+      const response = await fetch(`${API_BASE_URL}/recordings`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch recordings: ${response.statusText}`);
       }
+      const data: Recording[] = await response.json();
+      console.log(`Recordings fetched: ${data.length}`);
+      setRecordings(data.map(categorizeRecording)); // Apply categorization
+    } catch (err: any) {
+      console.error("Error fetching recordings:", err);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session]);
 
-      if (!permissionGranted) {
-        // This case should theoretically not be reached due to throws above, but belts and suspenders
-        throw new Error('Microphone permission was not granted.');
+  useEffect(() => {
+    if (session) {
+      fetchRecordings();
+    }
+  }, [session, fetchRecordings]);
+
+  useEffect(() => {
+    // Ensure we have a profile ID before subscribing
+    if (!profile?.id || !supabase) {
+      if (!profileLoading && profileError) {
+        console.error("[Realtime] Cannot subscribe: Profile error or not loaded", profileError);
+        // Optionally show an error to the user about profile loading failure
+      } else if (!profile?.id && !profileLoading) {
+        console.warn("[Realtime] Cannot subscribe: Profile not loaded yet.");
       }
+      return;
+    }
 
-      // 2. Get Upload URL and create metadata entry
-      console.log("Requesting upload URL...");
-      // Use state for title, provide a default if empty
-      const titleToSend = recordingTitle.trim() || `Recording - ${new Date().toLocaleString()}`;
+    console.log(`[Realtime] Setting up subscription for profile: ${profile.id}`);
 
-      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`,
-          },
-          // Send the actual title, keep duration 0 initially
-          body: JSON.stringify({ title: titleToSend, duration: 0 }), 
+    // --- Define the handler for receiving updates ---
+    const handleRecordingUpdate = (payload: any) => {
+        console.log('[Realtime] Received update:', payload);
+        const updatedRecording = payload.new as Recording;
+
+        if (!updatedRecording || !updatedRecording.id) {
+            console.warn('[Realtime] Received invalid update payload:', payload);
+            return;
+        }
+
+        setRecordings(currentRecordings => {
+            const index = currentRecordings.findIndex(r => r.id === updatedRecording.id);
+            if (index !== -1) {
+                console.log(`[Realtime] Updating recording ${updatedRecording.id} in state.`);
+                // Update existing recording - Merge to preserve non-DB fields
+                const updatedList = [...currentRecordings];
+                updatedList[index] = { 
+                    ...currentRecordings[index], // Keep existing frontend state like isPlaying
+                    ...categorizeRecording(updatedRecording) // Apply categorization to new data
+                };
+                return updatedList;
+            } else {
+                // If the recording isn't in the list (e.g., created after initial fetch),
+                // Prepend it (or you could trigger a refetch)
+                console.log(`[Realtime] Adding new recording ${updatedRecording.id} to state.`);
+                return [categorizeRecording(updatedRecording), ...currentRecordings];
+            }
+        });
+    };
+
+    // --- Create and manage the subscription channel ---
+    const channelKey = `recordings:profile_id=eq.${profile.id}`;
+    recordingUpdateChannel.current = supabase
+      .channel(channelKey)
+      .on(
+        'postgres_changes',
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'recordings',
+          filter: `profile_id=eq.${profile.id}` 
+        },
+        handleRecordingUpdate
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Realtime] Successfully subscribed to ${channelKey}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.error(`[Realtime] Subscription error on ${channelKey}:`, status, err);
+          setError(`Realtime connection issue: ${status}. Please refresh.`);
+        } else if (status === 'CLOSED') {
+            console.log(`[Realtime] Subscription closed for ${channelKey}`);
+        }
       });
 
+    // --- Cleanup function --- 
+    return () => {
+      if (recordingUpdateChannel.current) {
+        console.log(`[Realtime] Unsubscribing from ${channelKey}`);
+        supabase.removeChannel(recordingUpdateChannel.current)
+          .then(() => {
+            console.log(`[Realtime] Successfully removed channel ${channelKey}`);
+            recordingUpdateChannel.current = null;
+          })
+          .catch(error => {
+            console.error(`[Realtime] Error removing channel ${channelKey}:`, error);
+          });
+      } else {
+          console.log("[Realtime] No active channel to remove on cleanup.");
+      }
+    };
+
+  }, [profile?.id, profileLoading, profileError, supabase]); // Re-run if profile changes
+
+  const updateApiRecordingStatus = async (recordingId: string, status: string, errorMsg?: string, duration?: number) => {
+    if (!session) return;
+    console.log(`Updating API status for ${recordingId} to ${status}${duration ? ` with duration ${duration}s` : ''}`);
+    try {
+        const response = await fetch(`${API_BASE_URL}/recordings/${recordingId}/status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ status, error: errorMsg, duration }),
+        });
+        if (!response.ok) {
+            let errorDetail = `Status update failed: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorDetail = errorData.message || errorDetail;
+            } catch (e) {} 
+            throw new Error(errorDetail);
+        }
+        console.log(`Status updated successfully for ${recordingId}`);
+        // Refresh list after status update
+        fetchRecordings(); 
+    } catch (error: any) {
+        console.error(`Failed to update status to ${status} for ${recordingId}:`, error);
+        setSnackbarMessage(`Error updating status: ${error.message}`);
+        setSnackbarVisible(true);
+    }
+  };
+
+  // --- Recording Logic ---
+  const startRecording = async () => {
+    if (!session) {
+      setError("Authentication required.");
+      return;
+    }
+    if (isRecording || isLoading || isUploading) return;
+
+    setIsLoading(true);
+    setError(null);
+    activeUploadInfo.current = null; // Reset active upload info
+
+    try {
+      // 1. Request microphone permissions
+      console.log('Requesting permissions...');
+      const permissionResponse = await Audio.requestPermissionsAsync();
+      if (!permissionResponse.granted) {
+        throw new Error('Microphone permissions were denied.');
+      }
+      console.log('Web microphone permission granted.');
+
+      // 2. Get upload URL from backend
+      console.log('Requesting upload URL...');
+      const uploadUrlOptions = { 
+        method: 'POST', 
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json' // Important, even for empty body sometimes
+        },
+        body: JSON.stringify({}) // Send empty JSON object
+      };
+      console.log('DEBUG: Fetching upload URL with options:', uploadUrlOptions);
+      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, uploadUrlOptions);
+      
       if (!uploadResponse.ok) {
-          let errorMsg = 'Failed to prepare recording session';
-          try {
-              const errorData = await uploadResponse.json();
-              errorMsg = errorData.message || errorMsg;
-          } catch(e) {}
-          throw new Error(errorMsg);
+        const errorText = await uploadResponse.text();
+        throw new Error(`Failed to get upload URL: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
       }
 
       const uploadData = await uploadResponse.json();
-      activeUploadInfo.current = uploadData;
-      createdRecordingId = uploadData.recordingId; // Keep track in case of later errors
-      console.log("Upload URL received for recording ID:", createdRecordingId);
+      activeUploadInfo.current = uploadData; // <-- Store the upload info
+      console.log("Upload URL received for recording ID:", uploadData.recordingId);
 
       // 3. Configure Audio Mode (If needed, might be redundant after web getUserMedia)
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
+      // Consider if this is necessary for web platform
+      if (Platform.OS !== 'web') { 
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+      }
 
-      // 4. Start Expo Audio Recording
+      // 4. Create and start Expo recording instance
       console.log('Starting Expo AV recording...');
       // Ensure any previous recording instance is unloaded
-      if (recordingRef.current) {
-          await recordingRef.current.stopAndUnloadAsync();
-          recordingRef.current = null;
+      if (recordingInstance) {
+          await recordingInstance.stopAndUnloadAsync();
+          // No need to set to null here, setRecordingInstance will overwrite
       }
       const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        Audio.RecordingOptionsPresets.HIGH_QUALITY, // Or use specific options if needed
         (status) => {
-           if (status.isRecording && status.metering) {
-             const normalizedLevel = Math.max(0, 1 + status.metering / 50);
-             setAudioLevel(normalizedLevel);
+          // Update audio level for visualization (optional)
+          if (status.isRecording) {
+            setAudioLevel(status.metering ?? 0); // Use metering if available
+            setRecordingStatus(status);
           }
         },
-        100
+        100 // Update interval in ms
       );
-      recordingRef.current = recording;
+      setRecordingInstance(recording); // Set the new instance
 
       // 5. Start UI Timer
       startTimeRef.current = new Date();
-      if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(updateTimer, 1000);
-
       setIsRecording(true);
       console.log('Recording started.');
 
     } catch (error: any) {
       console.error('Error starting recording:', error);
-      setListError(error.message || 'Failed to start recording.');
-      // If metadata record was created but something failed after, mark it as failed
-      if (createdRecordingId) {
-          await updateApiRecordingStatus(createdRecordingId, 'start_failed', error.message);
+      setError(error.message || 'Failed to start recording.');
+      if (activeUploadInfo.current?.recordingId) { // Use stored ID if available
+          await updateApiRecordingStatus(activeUploadInfo.current.recordingId, 'failed', `Start failed: ${error.message}`);
       }
       activeUploadInfo.current = null;
     } finally {
-        setIsLoadingList(false);
+      setIsLoading(false);
     }
   };
 
-  // Stop Recording Process
   const stopRecording = async () => {
-    if (!recordingRef.current || !activeUploadInfo.current || isSaving) return;
+    // Use the info stored in the ref
+    if (!recordingInstance || !activeUploadInfo.current || isUploading) return;
     
+    const { recordingId, uploadUrl, storagePath } = activeUploadInfo.current;
+    console.log(`Stopping recording ${recordingId}...`);
+
     setIsRecording(false);
-    setIsSaving(true); 
+    setIsUploading(true); 
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
-    setAudioLevel(0); 
+    startTimeRef.current = null;
+    setAudioLevel(0);
 
-    const { recordingId, uploadUrl } = activeUploadInfo.current;
     let recordingUri: string | null = null;
     let durationSeconds: number = 0;
-    
-    console.log(`Stopping recording ${recordingId}...`);
 
     try {
       // Stop recording and get URI/Status
-      await recordingRef.current.stopAndUnloadAsync();
-      recordingUri = recordingRef.current.getURI();
-      const status = await recordingRef.current.getStatusAsync();
+      await recordingInstance.stopAndUnloadAsync();
+      recordingUri = recordingInstance.getURI();
+      const status = await recordingInstance.getStatusAsync();
       durationSeconds = Math.round((status.durationMillis || 0) / 1000);
-      recordingRef.current = null;
+      setRecordingInstance(null); 
 
       if (!recordingUri) {
-        throw new Error('Recording URI is missing after stop.');
+        throw new Error('Failed to get recording URI after stopping.');
       }
-
       console.log(`Recording stopped. URI: ${recordingUri}, Duration: ${durationSeconds}s`);
-      
-      // Don't need a separate PUT call now
-      /*
-      // Update final duration in metadata *before* upload attempt
-      // Note: This PUT endpoint doesn't exist yet, add it or combine with status update
-      // await fetch(`${API_BASE_URL}/recordings/${recordingId}`, { 
-      //    method: 'PUT', body: JSON.stringify({ duration: durationSeconds }) ... });
-      */
 
-      console.log(`Uploading to signed URL...`);
-      
-      // Fetch the recording file as a blob
-      const fileResponse = await fetch(recordingUri);
-      const blob = await fileResponse.blob();
+      // Fetch the blob from the URI
+      const blobResponse = await fetch(recordingUri);
+      const blob = await blobResponse.blob();
 
-      // Upload the blob to the signed URL
-      const uploadResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          headers: {
-              'Content-Type': blob.type || 'audio/m4a', 
-          },
-          body: blob,
+      // Upload the blob to the signed URL (use the stored URL)
+      console.log('Uploading to signed URL...');
+      setUploadProgress(0);
+      const uploadResponseS3 = await fetch(uploadUrl, { // <-- Use stored uploadUrl
+        method: 'PUT',
+        headers: { 'Content-Type': blob.type || 'audio/m4a' },
+        body: blob,
       });
 
-      if (!uploadResponse.ok) {
-          let errorDetail = `Upload failed: ${uploadResponse.status}`;
-          try {
-              const errorXml = await uploadResponse.text();
-              console.error("Storage Upload Error Response:", errorXml);
-              const messageMatch = errorXml.match(/<Message>(.*?)<\/Message>/);
-              if (messageMatch && messageMatch[1]) {
-                  errorDetail = messageMatch[1];
-              }
-          } catch (parseError) { /* Ignore parsing error */ }
-          throw new Error(errorDetail);
+      if (!uploadResponseS3.ok) {
+        const errorText = await uploadResponseS3.text();
+        throw new Error(`Upload failed: ${uploadResponseS3.status} ${uploadResponseS3.statusText} - ${errorText}`);
       }
-
       console.log(`Upload successful for ${recordingId}. Updating status...`);
-      // Update status to 'uploaded' AND include the final duration
-      await updateApiRecordingStatus(recordingId, 'uploaded', undefined, durationSeconds); 
+      setUploadProgress(100);
 
-      setSnackbarMessage('Recording saved successfully!');
+      // Update backend status to 'uploaded'
+      await updateApiRecordingStatus(recordingId, 'uploaded', undefined, durationSeconds);
 
     } catch (error: any) {
-      console.error('Error stopping or uploading recording:', error);
-      setSnackbarMessage(`Error saving recording: ${error.message}`);
-      // Update status to 'upload_failed' via backend
-      // Optionally send duration here too, though maybe less critical on failure
-      await updateApiRecordingStatus(recordingId, 'upload_failed', error.message, durationSeconds); 
+      console.error(`Error stopping/uploading recording ${recordingId}:`, error);
+      setError(error.message || 'Failed to stop or upload recording.');
+      await updateApiRecordingStatus(recordingId, 'failed', `Stop/Upload failed: ${error.message}`, durationSeconds);
     } finally {
-      setIsSaving(false);
-      activeUploadInfo.current = null; 
-      setRecordingTime('00:00'); 
-      // List refresh is handled by updateApiRecordingStatus
-      setSnackbarVisible(true);
+      setIsUploading(false);
+      activeUploadInfo.current = null; // Clear the ref
+      setRecordingTime('00:00');
+      setRecordingInstance(null);
+      setUploadProgress(0);
     }
   };
 
-  // Cancel Recording
   const cancelRecording = async () => {
-    if (isSaving) return; // Don't cancel if already saving
-    
+    if (isUploading) return;
+    const recordingIdToCancel = activeUploadInfo.current?.recordingId;
+    console.log(`Cancelling recording process ${recordingIdToCancel ? `for ${recordingIdToCancel}`: ''}...`);
+
     setIsRecording(false);
-    setAudioLevel(0);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+    startTimeRef.current = null;
     setRecordingTime('00:00');
+    setAudioLevel(0);
 
     // Stop and unload the Expo recording instance first
-    if (recordingRef.current) {
+    if (recordingInstance) {
       console.log('Cancelling Expo recording instance...');
       try {
-      await recordingRef.current.stopAndUnloadAsync();
+        await recordingInstance.stopAndUnloadAsync();
       } catch (error) {
         console.error("Error stopping Expo recording on cancel:", error);
       }
-      recordingRef.current = null;
+      setRecordingInstance(null);
     }
 
-    // If we had started the backend process, mark the record as cancelled
-    if (activeUploadInfo.current) {
-      const cancelledId = activeUploadInfo.current.recordingId;
-      console.log("Marking cancelled recording as cancelled in backend:", cancelledId);
+    // If we had started the backend process (got an ID), mark the record as cancelled
+    if (recordingIdToCancel) {
+      console.log("Marking cancelled recording as cancelled in backend:", recordingIdToCancel);
       // Update status via API
-      await updateApiRecordingStatus(cancelledId, 'cancelled'); 
+      await updateApiRecordingStatus(recordingIdToCancel, 'cancelled'); 
     }
     
-    activeUploadInfo.current = null; // Clear upload info
+    activeUploadInfo.current = null; // Clear the ref
     setSnackbarMessage('Recording cancelled.');
     setSnackbarVisible(true);
   };
-  
-  // --- UI Rendering ---
 
-  const renderRecordingItem: ListRenderItem<Recording> = useCallback(({ item }) => (
-    <RecordingItem 
-      recording={item}
-      currentlyPlayingId={currentlyPlayingId}
-      setCurrentlyPlayingId={setCurrentlyPlayingId}
-      showDeleteConfirmDialog={showDeleteConfirmDialog} 
-    />
-  ), [currentlyPlayingId, showDeleteConfirmDialog]);
+  // --- UI Filtering and Rendering ---
+  const filteredRecordings = useMemo(() => {
+    // First filter by search query
+    let filtered = recordings;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(recording => 
+        recording.title?.toLowerCase().includes(query) || 
+        recording.transcription?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Then filter by active tab
+    if (activeFilter !== 'all') {
+      const category = activeFilter === 'appointments' 
+        ? 'Appointment' 
+        : activeFilter === 'reminders' 
+        ? 'Reminder' 
+        : 'Other';
+      
+      filtered = filtered.filter(recording => recording.category === category);
+    }
+    
+    return filtered;
+  }, [recordings, searchQuery, activeFilter]);
 
-  const ListEmptyComponent = () => {
-    console.log("ListEmptyComponent rendering with state:", { isLoadingList, listError, sessionExists: !!session }); 
+  const groupedAndFilteredRecordings = useMemo(() => {
+    return groupRecordingsByDate(filteredRecordings);
+  }, [filteredRecordings]);
+
+  // --- Empty List Components ---
+  const CategoryEmptyComponent = () => {
+    let message = '';
+    let icon: keyof typeof MaterialCommunityIcons.glyphMap = 'text-box-outline'; 
+    
+    switch (activeFilter) {
+      case 'appointments':
+        message = 'No appointments yet';
+        icon = 'calendar';
+        break;
+      case 'reminders':
+        message = 'No reminders yet';
+        icon = 'bell';
+        break;
+      case 'others':
+        message = 'No other recordings yet';
+        icon = 'text-box-outline';
+        break;
+      default:
+        message = 'No recordings yet';
+        icon = 'microphone-outline';
+    }
+    
     return (
       <View style={styles.emptyContainer}>
-          {isLoadingList ? (
-              <ActivityIndicator size="large" color={theme.colors.primary}/>
-          ) : listError ? (
-              <>
-                <Text style={[styles.emptyText, {color: theme.colors.error}]}>Error: {listError}</Text>
-                <Button onPress={fetchRecordings} mode="outlined">Retry</Button>
-              </>
-          ) : !session ? (
-               <Text style={styles.emptyText}>Please log in to view recordings.</Text>
-          ) : (
-               <Text style={styles.emptyText}>No recordings yet. Press the mic to start!</Text>
-          )}
+        <MaterialCommunityIcons name={icon} size={48} color="#6B7280" />
+        <Text style={styles.emptyText}>{message}</Text>
+        <Text style={styles.emptySubText}>Tap the mic button to create one</Text>
       </View>
     );
   };
 
-  // --- Execute Delete from Dialog --- 
-  const executeDelete = useCallback(async () => {
-    if (!recordingToDelete || !session?.access_token) {
-      // console.log("[RecordScreen] Execute delete called without target or token.");
-      hideConfirmDialog();
-      return;
-    }
-    
-    const { id: recordingId } = recordingToDelete;
-    hideConfirmDialog(); 
-    // console.log(`[RecordScreen] Confirmed delete via Dialog for ${recordingId}, proceeding...`);
-    setIsDeleting(true); 
-    
-    try {
-      // console.log(`[RecordScreen] Calling deleteRecording service for ${recordingId}...`);
-      await deleteRecording(recordingId, session.access_token);
-      // console.log(`[RecordScreen] Delete service call successful for ${recordingId}.`);
-      setSnackbarMessage('Recording deleted successfully.');
-      setSnackbarVisible(true);
-      fetchRecordings(); 
-    } catch (error: any) {
-      console.error(`[RecordScreen] Error deleting recording ${recordingId}:`, error); // Keep error log
-      setSnackbarMessage(error.message || "Failed to delete recording.");
-      setSnackbarVisible(true);
-    } finally {
-      setIsDeleting(false); 
-    }
-  }, [recordingToDelete, session, fetchRecordings]);
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
-      <StatusBar style={Platform.OS === 'ios' ? 'light' : theme.dark ? 'light' : 'dark'} />
-      <AppHeader title="Recordings" />
-
-      {/* Add Title Input Field Here */}
-      {!isRecording && (
-          <View style={styles.titleInputContainer}>
-              <TextInput
-                  label="Recording Title (Optional)"
-                  value={recordingTitle}
-                  onChangeText={setRecordingTitle}
-                  mode="outlined"
-                  style={styles.titleInput}
-                  disabled={isRecording || isLoadingList || isSaving}
-              />
-          </View>
-      )}
-
-      <FlatList
-        data={recordings}
-        renderItem={renderRecordingItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContentContainer}
-        ListEmptyComponent={ListEmptyComponent}
-        // Only show refresh control when not loading initially
-        refreshing={isLoadingList && recordings.length > 0} 
-        onRefresh={isDeleting ? undefined : fetchRecordings} 
-        // Add extraData to ensure re-render when currentlyPlayingId changes
-        extraData={currentlyPlayingId} 
-        scrollEnabled={!isDeleting}
-      />
-
-      {/* Recording Control Area */}
-      <View style={[styles.controlsContainer, { backgroundColor: theme.colors.background }]}>
-        {isRecording && (
-          <View style={styles.timerStatusContainer}>
-            <Text style={[styles.timerText, { color: theme.colors.onSurface }]}>{recordingTime}</Text>
-            <Text style={[styles.statusText, { color: theme.colors.onSurfaceVariant }]}>Recording...</Text>
-        </View>
-      )}
-
-        <AudioWaveform isRecording={isRecording} audioLevel={audioLevel} />
-
-      {isRecording ? (
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity style={styles.controlButton} onPress={cancelRecording} disabled={isSaving}>
-              <MaterialCommunityIcons name="close" size={30} color={theme.colors.error} />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.controlButton, {backgroundColor: theme.colors.error}] } 
-              onPress={stopRecording}
-              disabled={isSaving}
-            >
-                {isSaving ? <ActivityIndicator color="#fff" /> : <MaterialCommunityIcons name="stop" size={40} color="#fff" />}
-            </TouchableOpacity>
-            </View>
-          ) : (
-                <TouchableOpacity 
-             style={[styles.recordButton, { backgroundColor: theme.colors.primary }]} 
-                  onPress={startRecording}
-             disabled={isLoadingList || isSaving || !session}
-                >
-            <MaterialCommunityIcons name="microphone" size={40} color="#fff" />
-                </TouchableOpacity>
+  const ListEmptyComponent = () => {
+    return (
+      <View style={styles.emptyContainer}>
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#4F46E5"/>
+        ) : error ? (
+          <>
+            <Text style={styles.emptyText}>Error: {error}</Text>
+            <Button mode="outlined" onPress={fetchRecordings} style={{ marginTop: 12 }}>Retry</Button>
+          </>
+        ) : !session ? (
+          <Text style={styles.emptyText}>Please log in to view recordings.</Text>
+        ) : searchQuery.trim() ? (
+          <>
+            <MaterialCommunityIcons name="magnify-close" size={48} color="#6B7280" />
+            <Text style={styles.emptyText}>No results found</Text>
+            <Text style={styles.emptySubText}>Try different search terms</Text>
+          </>
+        ) : (
+          <CategoryEmptyComponent />
         )}
-              </View>
+      </View>
+    );
+  };
 
-      {/* --- Add Confirmation Dialog --- */}
+  // --- Render Functions ---
+  const renderRecordingItem: ListRenderItem<Recording> = useCallback(({ item }) => (
+    <RecordingItem
+      recording={item}
+      currentlyPlayingId={currentlyPlayingId}
+      setCurrentlyPlayingId={setCurrentlyPlayingId}
+      showDeleteConfirmDialog={showConfirmDialog}
+      setSnackbarMessage={setSnackbarMessage}
+      setSnackbarVisible={setSnackbarVisible}
+    />
+  ), [currentlyPlayingId, showConfirmDialog, setSnackbarMessage, setSnackbarVisible]);
+
+  const renderSectionHeader = ({ section: { title } }: { section: RecordingSection }) => (
+    <SectionHeader title={title} />
+  );
+
+  // --- Main Render ---
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar style={theme.dark ? "light" : "dark"} />
+      
+      <View style={styles.contentWrapper}>
+        {/* Header & Search */}
+        <View style={styles.headerContainer}>
+          <Text style={styles.headerTitle}>Recordings</Text>
+          
+          <View style={styles.searchContainer}>
+            <TextInput
+              placeholder="Search or add a title..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              mode="outlined"
+              style={styles.searchInput}
+              outlineStyle={{ borderRadius: 8 }}
+              disabled={isRecording}
+              right={
+                searchQuery ? 
+                <TextInput.Icon icon="close" onPress={() => setSearchQuery('')} /> : 
+                undefined
+              }
+            />
+            <IconButton
+              icon="tune"
+              size={24}
+              style={styles.filterButton}
+              onPress={() => {}}
+            />
+          </View>
+          
+          {/* Segment Control / Tabs */}
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.tabScrollContainer}
+          >
+            <View style={styles.tabContainer}>
+              <SegmentedButtons
+                value={activeFilter}
+                onValueChange={setActiveFilter}
+                buttons={[
+                  { value: 'all', label: `All (${recordings.length})` },
+                  { value: 'appointments', label: `Appointments (${recordings.filter(r => r.category === 'Appointment').length})` },
+                  { value: 'reminders', label: `Reminders (${recordings.filter(r => r.category === 'Reminder').length})` },
+                  { value: 'others', label: `Others (${recordings.filter(r => r.category === 'Other').length})` }
+                ]}
+                style={styles.segmentButtons}
+              />
+            </View>
+          </ScrollView>
+        </View>
+        
+        {/* Recordings List */}
+        <SectionList
+          sections={groupedAndFilteredRecordings}
+          keyExtractor={(item) => item.id}
+          renderItem={renderRecordingItem}
+          renderSectionHeader={renderSectionHeader}
+          contentContainerStyle={styles.listContentContainer}
+          ListEmptyComponent={ListEmptyComponent}
+          refreshing={isLoading && recordings.length > 0}
+          onRefresh={fetchRecordings}
+          stickySectionHeadersEnabled={true}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+        />
+        
+        {/* Recording UI */}
+        {isRecording && (
+          <Surface style={styles.recordingOverlay} elevation={4}>
+            <View style={styles.timerStatusContainer}>
+              <Text style={styles.timerText}>{recordingTime}</Text>
+              <Text style={styles.statusText}>Recording...</Text>
+              <AudioWaveform isRecording={isRecording} audioLevel={audioLevel} />
+            </View>
+            <View style={styles.recordingButtonContainer}>
+              <TouchableOpacity 
+                style={[styles.cancelButton, { borderColor: theme.colors.error }]} 
+                onPress={cancelRecording} 
+                disabled={isUploading}
+              >
+                <MaterialCommunityIcons name="close" size={24} color={theme.colors.error} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.stopButton, { backgroundColor: theme.colors.error }]}
+                onPress={stopRecording}
+                disabled={isUploading}
+              >
+                {isUploading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <MaterialCommunityIcons name="stop" size={32} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </Surface>
+        )}
+        
+        {/* Floating Action Button */}
+        {!isRecording && (
+          <TouchableOpacity
+            style={styles.fabButton}
+            onPress={startRecording}
+            disabled={isLoading || isUploading || !session}
+          >
+            <MaterialCommunityIcons name="microphone" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
+      </View>
+      
+      {/* Delete Confirmation Dialog */}
       <Portal>
-        <Dialog visible={confirmDialogVisible} onDismiss={hideConfirmDialog}>
-          <Dialog.Icon icon="alert-circle-outline" color={theme.colors.error} size={36} />
+        <Dialog visible={isConfirmDialogVisible} onDismiss={hideConfirmDialog}>
+          <Dialog.Icon icon="alert-circle-outline" color="#EF4444" size={36} />
           <Dialog.Title style={styles.dialogTitle}>Confirm Deletion</Dialog.Title>
           <Dialog.Content>
-            <Text variant="bodyMedium">
+            <Text style={styles.dialogText}>
               Are you sure you want to delete "{recordingToDelete?.title || 'this recording'}"?
               This action cannot be undone.
             </Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={hideConfirmDialog} disabled={isDeleting}>Cancel</Button>
-            <Button onPress={executeDelete} textColor={theme.colors.error} disabled={isDeleting} loading={isDeleting}>
-                Delete
+            <Button 
+              onPress={handleDeleteConfirm} 
+              textColor="#EF4444" 
+              disabled={isDeleting}
+              loading={isDeleting}
+            >
+              Delete
             </Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
-      {/* --- End Confirmation Dialog --- */}
       
+      {/* Snackbar */}
       <Snackbar
-          visible={snackbarVisible}
-          onDismiss={() => setSnackbarVisible(false)}
-          duration={3000} // 3 seconds
-          style={{ bottom: 80 }} // Adjust position if needed
+        visible={snackbarVisible}
+        onDismiss={onSnackbarDismiss}
+        duration={3000}
+        style={styles.snackbar}
       >
-          {snackbarMessage}
+        {snackbarMessage}
       </Snackbar>
     </SafeAreaView>
   );
@@ -888,52 +1274,149 @@ function RecordScreenContent() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F9FAFB',
   },
-  header: {
-    padding: 16,
-  },
-  searchBar: {
-    elevation: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    height: 48,
-  },
-  searchInput: {
-    fontSize: 16,
-  },
-  filterContainer: {
+  contentWrapper: {
+    flex: 1,
+    maxWidth: 768,
+    marginHorizontal: 'auto',
+    width: '100%',
     paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  headerContainer: {
     marginBottom: 16,
   },
-  filterButtons: {
-    backgroundColor: 'transparent',
+  headerTitle: {
+    fontSize: 24,
+    lineHeight: 32,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    height: 44, // Increased height
+    backgroundColor: '#FFFFFF',
+    fontSize: 14,
+    color: '#374151',
   },
   filterButton: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    marginLeft: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
   },
-  recordingContainer: {
-    flex: 1,
+  tabScrollContainer: {
+    marginBottom: 8,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    paddingBottom: 8,
+  },
+  segmentButtons: {
+    height: 36,
+    minWidth: 600, // Force horizontal scrolling
+  },
+  sectionHeader: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#F3F4F6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    marginTop: 0,
+    marginBottom: 0,
+    zIndex: 1,
+    elevation: 1,
+  },
+  sectionHeaderText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  cardContainer: {
+    borderRadius: 8,
+    marginBottom: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    flexWrap: 'nowrap',
+  },
+  iconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#7C3AED',
-    margin: 16,
-    borderRadius: 24,
-    overflow: 'hidden',
+    position: 'relative',
+    flexShrink: 0,
   },
-  timerText: {
-    fontSize: 48,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    color: '#FFFFFF',
+  categoryIcon: {
+    position: 'absolute',
+    opacity: 0.7,
+  },
+  playIcon: {
+    position: 'absolute',
+  },
+  textContainer: {
+    flex: 1,
+    marginLeft: 12,
+    minWidth: 0,
+  },
+  titleText: {
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 32,
+    color: '#111827',
+    marginBottom: 4,
   },
-  recordButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#E11D48',
+  metaText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+    marginLeft: 8,
+  },
+  statusIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  menuButton: {
+    margin: 0,
+    padding: 8,
+    borderRadius: 22,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabButton: {
+    position: 'absolute',
+    right: 24,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#4F46E5',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -942,178 +1425,102 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  recordButtonInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  transcriptionContainer: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    margin: 16,
-    marginTop: 0,
-  },
-  transcriptionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  transcriptionText: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#4B5563',
-  },
-  summaryContainer: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    margin: 16,
-    marginTop: 0,
-  },
-  flex: {
-    flex: 1,
-  },
   listContentContainer: {
-    paddingBottom: 180, // Ensure space for controls
+    paddingBottom: 80,
+    minHeight: '100%',
   },
-  itemOuterContainer: { // New outer container for touchable opacity
-    marginBottom: 8,
-    borderRadius: 8,
-    // Add other styling like background if needed for highlighting
-    overflow: 'hidden', // Clip modal if absolutely positioned somehow
-  },
-  itemContainer: { // Assuming this style exists
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 8,
-    // backgroundColor will be set dynamically
-  },
-  itemContentContainer: { // Added this (or similar name might exist)
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  itemTextContainer: { // Assuming this style exists
-    flex: 1,
-    justifyContent: 'center',
-  },
-  itemTitle: { // Assuming this style exists
-    marginBottom: 2,
-  },
-  itemDetail: { // Assuming this style exists
-    opacity: 0.7,
-  },
-  playButton: { // Assuming this style exists
-    marginRight: 12,
-    padding: 4, // Add padding for easier touch
-  },
-  menuButton: { // Assuming this style exists
-    padding: 8, // Increase touchable area
-    marginLeft: 8,
-  },
-  modalContainer: { // Assuming this style exists for the modal
-     padding: 20,
-     margin: 20,
-     borderRadius: 8,
-  },
-  modalTitle: { // Assuming this style exists
-     marginBottom: 16,
-     textAlign: 'center',
-  },
-  input: { // Assuming this style exists for modal input
-     marginBottom: 16,
-  },
-  modalActions: { // Assuming this style exists
-     flexDirection: 'row',
-     justifyContent: 'flex-end',
-     gap: 8, // Add gap between buttons
-  },
-  // Controls Styles
-  controlsContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)', // Slightly transparent white
-    paddingBottom: Platform.OS === 'ios' ? 25 : 15, // More padding for iOS bottom bar
-    paddingTop: 10,
-    paddingHorizontal: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    alignItems: 'center',
-  },
-  waveform: {
-    height: 50,
-    width: '100%',
-    marginBottom: 10,
-  },
-  timerStatusContainer: {
-      alignItems: 'center',
-      marginBottom: 10,
-  },
-  statusText: {
-    fontSize: 14,
-  },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    width: '100%',
-  },
-  controlButton: {
-    padding: 10,
-  },
-  // Empty List Styles
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 50,
-    marginBottom: 50, // Add margin bottom
+    paddingVertical: 32,
   },
   emptyText: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginTop: 16,
   },
   emptySubText: {
-    marginTop: 5,
     fontSize: 14,
-    color: '#666',
+    color: '#6B7280',
     textAlign: 'center',
+    marginTop: 8,
     paddingHorizontal: 40,
   },
-  titleInputContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8, // Add some top padding
-    paddingBottom: 8, // Add some bottom padding
+  recordingOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#FFFFFF',
   },
-  titleInput: {
-    // Add styling if needed
+  timerStatusContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  itemLoadingIndicator: {
-    marginLeft: 12, 
-    // Add other styling as needed
+  timerText: {
+    fontSize: 48,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#111827',
+    fontWeight: '600',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  recordingButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 24,
+  },
+  cancelButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    padding: 20,
+    margin: 20,
+    borderRadius: 8,
+  },
+  modalTitle: {
+    marginBottom: 16,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  input: {
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   dialogTitle: {
     textAlign: 'center',
   },
-  loadingOverlay: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: 'rgba(0,0,0,0.1)', // Slight overlay
-      zIndex: 10, // Ensure it's above the list
+  dialogText: {
+    color: '#4B5563',
+    lineHeight: 20,
+  },
+  snackbar: {
+    bottom: 16,
   },
 }); 

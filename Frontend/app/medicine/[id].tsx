@@ -1,219 +1,215 @@
-import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
-import { Text, useTheme, Surface, Button, IconButton, Divider } from 'react-native-paper';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { Text, useTheme, Surface, Button, IconButton, Divider, List, Chip } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-interface MedicineDetails {
-  id: string;
-  name: string;
-  dosage: string;
-  frequency: string;
-  remaining: string;
-  instructions: string;
-  sideEffects: string[];
-  substitutes: string[];
-  composition: string;
-}
+import { getDrugDetailsByRxcui, ProcessedDrugProperties } from '@/services/medicineService'; // Adjust path if needed
 
-// Mock data - replace with actual data fetching
-const medicinesData: MedicineDetails[] = [
-  {
-    id: '1',
-    name: 'Medicine 1 500mg',
-    dosage: '500 mg',
-    frequency: 'Once daily (Morning)',
-    remaining: '30 tablets',
-    instructions: 'Take on empty stomach in the morning',
-    sideEffects: ['Nausea', 'Headache'],
-    substitutes: ['Generic Medicine 1'],
-    composition: 'Active ingredient 500 mg'
-  },
-  {
-    id: '2',
-    name: 'Crocin 500mg',
-    dosage: '500 mg',
-    frequency: 'Every 6 hours',
-    remaining: '20 tablets',
-    instructions: 'Take one tablet every 6 hours',
-    sideEffects: ['Drowsiness', 'Upset stomach'],
-    substitutes: ['Paracetamol', 'Acetaminophen'],
-    composition: 'Paracetamol 500 mg'
-  },
-  {
-    id: '3',
-    name: 'Syrup 1',
-    dosage: '1 cap',
-    frequency: 'Twice daily (Morning and Evening)',
-    remaining: '200 ml',
-    instructions: 'Take one cap in morning and evening',
-    sideEffects: ['Drowsiness'],
-    substitutes: ['Alternative Syrup'],
-    composition: 'Active ingredients in syrup form'
-  },
-  {
-    id: '4',
-    name: 'Medicine 2',
-    dosage: '250 mg',
-    frequency: 'Thrice daily',
-    remaining: '45 tablets',
-    instructions: 'Take one tablet in morning, afternoon, and evening',
-    sideEffects: ['Dizziness'],
-    substitutes: ['Generic Medicine 2'],
-    composition: 'Active ingredient 250 mg'
-  },
-  {
-    id: '5',
-    name: 'Steam with Green Capsule',
-    dosage: '1 capsule',
-    frequency: 'Twice daily',
-    remaining: '20 capsules',
-    instructions: 'Use with steam inhalation morning and evening',
-    sideEffects: ['Throat irritation'],
-    substitutes: ['Alternative steam medicine'],
-    composition: 'Green capsule contents'
-  },
-  {
-    id: '6',
-    name: 'Ear Drops',
-    dosage: '5 drops',
-    frequency: 'As needed',
-    remaining: '15 ml',
-    instructions: 'Apply 5 drops in left ear',
-    sideEffects: ['Temporary hearing changes'],
-    substitutes: ['Alternative ear drops'],
-    composition: 'Active ingredients in solution'
-  },
-  {
-    id: '7',
-    name: 'Medicine 4',
-    dosage: '300 mg',
-    frequency: 'Once daily',
-    remaining: '30 tablets',
-    instructions: 'Take one tablet every night after meal',
-    sideEffects: ['Sleepiness'],
-    substitutes: ['Generic Medicine 4'],
-    composition: 'Active ingredient 300 mg'
-  },
-  {
-    id: '8',
-    name: 'Lunch Medicine',
-    dosage: '400 mg',
-    frequency: 'Once daily',
-    remaining: '30 tablets',
-    instructions: 'Take during lunch time',
-    sideEffects: ['Mild stomach pain'],
-    substitutes: ['Alternative lunch medicine'],
-    composition: 'Active ingredient 400 mg'
-  },
-  {
-    id: '9',
-    name: 'Medicine 10',
-    dosage: '200 mg',
-    frequency: 'Once daily',
-    remaining: '30 tablets',
-    instructions: 'Take 10 minutes after dinner',
-    sideEffects: ['Drowsiness'],
-    substitutes: ['Alternative night medicine'],
-    composition: 'Active ingredient 200 mg'
-  },
-  {
-    id: '10',
-    name: 'Aspirin 500mg',
-    dosage: '500 mg',
-    frequency: 'Once daily',
-    remaining: '30 tablets',
-    instructions: 'Take after meal in the morning',
-    sideEffects: ['Upset stomach', 'Heartburn'],
-    substitutes: ['Generic Aspirin'],
-    composition: 'Acetylsalicylic acid 500 mg'
-  }
-];
+// Remove mock data
+// interface MedicineDetails { ... }
+// const medicinesData: MedicineDetails[] = [ ... ];
 
 export default function MedicineDetailScreen() {
   const theme = useTheme();
   const params = useLocalSearchParams();
-  const medicineId = params.id as string;
-  
-  // Find the medicine data based on the ID from the URL
-  const medicineData = medicinesData.find(med => med.id === medicineId) || medicinesData[0];
+  const rxcui = params.id as string; // ID from route is the RxCUI
 
+  const [medicineDetails, setMedicineDetails] = useState<ProcessedDrugProperties | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchDetails = async () => {
+      if (!rxcui) {
+        setError('Medicine ID not found.');
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+      try {
+        const details = await getDrugDetailsByRxcui(rxcui);
+        if (details) {
+          setMedicineDetails(details);
+        } else {
+          setError('Medicine details not found.');
+        }
+      } catch (err) {
+        setError('Failed to load medicine details. Please try again.');
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDetails();
+  }, [rxcui]); // Re-fetch if rxcui changes
+
+  // Optional: Reorder functionality (keep or remove based on requirements)
   const handleReorder = () => {
+    // This might need adjustment - reordering based on RxCUI?
+    // Or perhaps this button should be removed from this screen?
     router.push('/medicine/reorder');
   };
 
+  if (isLoading) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" animating={true} />
+        <Text style={styles.loadingText}>Loading Medicine Details...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]}>
+        <Stack.Screen options={{ title: 'Error' }} />
+        <Text style={styles.errorText}>{error}</Text>
+        <Button mode="outlined" onPress={() => router.back()} style={{ marginTop: 20 }}>
+          Go Back
+        </Button>
+      </SafeAreaView>
+    );
+  }
+
+  if (!medicineDetails) {
+    // Should ideally be caught by error state, but as a fallback
+    return (
+      <SafeAreaView style={[styles.container, styles.center]}>
+         <Stack.Screen options={{ title: 'Not Found' }} />
+        <Text style={styles.errorText}>Medicine details could not be loaded.</Text>
+        <Button mode="outlined" onPress={() => router.back()} style={{ marginTop: 20 }}>
+          Go Back
+        </Button>
+      </SafeAreaView>
+    );
+  }
+
+  // Render the fetched details
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+       {/* Use Stack.Screen to dynamically set the title */}
+      <Stack.Screen options={{ title: medicineDetails.name || 'Medicine Details' }} />
+      {/* Keep header or remove if Stack.Screen handles title/back button */}
+      {/* 
       <View style={styles.header}>
         <IconButton
           icon="arrow-left"
           size={24}
           onPress={() => router.back()}
         />
-        <Text variant="headlineSmall" style={styles.title}>Medicine Details</Text>
-        <View style={{ width: 48 }} />
+        <Text variant="headlineSmall" style={styles.title}>{medicineDetails.name || 'Medicine Details'}</Text>
+        <View style={{ width: 48 }} /> // Spacer for centering title 
       </View>
+      */}
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContentContainer}>
         <Surface style={[styles.section, { backgroundColor: theme.colors.surface }]}>
           <Text variant="headlineMedium" style={styles.medicineName}>
-            {medicineData.name}
+            {medicineDetails.name}
           </Text>
+          <View style={styles.headerInfo}> 
+            <Text variant="bodySmall" style={styles.rxcuiText}>RxCUI: {medicineDetails.rxcui}</Text>
+            {medicineDetails.tty && <Chip icon="tag" style={styles.chip} textStyle={styles.chipText}>{medicineDetails.tty}</Chip>}
+            {medicineDetails.deaSchedule && <Chip icon="lock-outline" style={[styles.chip, styles.deaChip]} textStyle={styles.chipText}>DEA: {medicineDetails.deaSchedule}</Chip>}
+          </View>
           
+          {/* Consider if Reorder button makes sense here */}
+          {/* 
           <Button
             mode="contained"
             onPress={handleReorder}
             style={styles.reorderButton}
           >
             Reorder
-          </Button>
+          </Button> 
+          */}
 
           <Divider style={styles.divider} />
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Dosage:</Text>
-            <Text variant="bodyLarge">{medicineData.dosage}</Text>
-          </View>
+          {/* --- Brand Names Section --- */} 
+          {medicineDetails.brandNames && (
+             <View style={styles.infoSection}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>Brand Name(s)</Text>
+                {medicineDetails.brandNames.map((item, index) => (
+                    <Text key={index} variant="bodyLarge" style={styles.listItem}>• {item}</Text>
+                ))}
+             </View>
+          )}
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Frequency:</Text>
-            <Text variant="bodyLarge">{medicineData.frequency}</Text>
-          </View>
+          {/* --- Manufacturer Section --- */} 
+          {medicineDetails.manufacturer && (
+             <View style={styles.infoSection}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>Manufacturer</Text>
+                <Text variant="bodyLarge" style={styles.listItem}>{medicineDetails.manufacturer}</Text>
+             </View>
+          )}
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Remaining:</Text>
-            <Text variant="bodyLarge">{medicineData.remaining}</Text>
-          </View>
+          {/* --- Dosage & Strength Section --- */} 
+          {(medicineDetails.dosageForms || medicineDetails.strengths) && (
+              <View style={styles.infoSection}>
+                 <Text variant="titleMedium" style={styles.sectionTitle}>Form & Strength</Text>
+                 {medicineDetails.dosageForms && medicineDetails.dosageForms.map((item, index) => (
+                    <Text key={`form-${index}`} variant="bodyLarge" style={styles.listItem}>• Form: {item}</Text>
+                 ))}
+                 {medicineDetails.strengths && medicineDetails.strengths.map((item, index) => (
+                    <Text key={`strength-${index}`} variant="bodyLarge" style={styles.listItem}>• Strength: {item}</Text>
+                 ))}
+              </View>
+          )}
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Instructions:</Text>
-            <Text variant="bodyLarge">{medicineData.instructions}</Text>
-          </View>
+          {/* --- Ingredients Section --- */} 
+          {medicineDetails.ingredients && (
+            <View style={styles.infoSection}>
+              <Text variant="titleMedium" style={styles.sectionTitle}>Active Ingredients</Text>
+              {medicineDetails.ingredients.map((item, index) => (
+                <Text key={`ing-${index}`} variant="bodyLarge" style={styles.listItem}>• {item}</Text>
+              ))}
+            </View>
+          )}
+          
+          {/* --- Synonyms Section --- */} 
+          {medicineDetails.synonyms && (
+            <View style={styles.infoSection}>
+              <Text variant="titleMedium" style={styles.sectionTitle}>Synonyms</Text>
+              {medicineDetails.synonyms.map((item, index) => (
+                 <Text key={`syn-${index}`} variant="bodyLarge" style={styles.listItem}>• {item}</Text>
+              ))}
+            </View>
+          )}
+          
+          {/* --- NDC Section --- */} 
+          {medicineDetails.ndcs && (
+             <View style={styles.infoSection}>
+              <Text variant="titleMedium" style={styles.sectionTitle}>NDC Codes</Text>
+              {medicineDetails.ndcs.map((item, index) => (
+                <Text key={`ndc-${index}`} variant="bodyLarge" style={styles.listItem}>• {item}</Text>
+              ))}
+            </View>
+          )}
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Side Effects:</Text>
-            {medicineData.sideEffects.map((effect, index) => (
-              <Text key={index} variant="bodyLarge" style={styles.listItem}>
-                • {effect}
-              </Text>
-            ))}
-          </View>
+          {/* TODO: Add other sections as needed (e.g., Interactions - requires different API calls) */}
 
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Substitutes:</Text>
-            {medicineData.substitutes.map((substitute, index) => (
-              <Text key={index} variant="bodyLarge" style={styles.listItem}>
-                • {substitute}
-              </Text>
-            ))}
-          </View>
-
-          <View style={styles.infoSection}>
-            <Text variant="titleMedium" style={styles.sectionTitle}>Composition:</Text>
-            <Text variant="bodyLarge">{medicineData.composition}</Text>
-          </View>
         </Surface>
+        
+        {/* Section to display Raw Properties (Optional for debugging/completeness) */}
+        {/* 
+        <Surface style={[styles.section, { backgroundColor: theme.colors.surface, marginTop: 15 }]}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>Raw Properties (Debug):</Text>
+             <List.Accordion title="Show Raw Data">
+              {medicineDetails.rawProperties.map((prop, index) => (
+                <List.Item 
+                  key={index} 
+                  title={`${prop.propName}: ${prop.propValue}`} 
+                  titleNumberOfLines={3} 
+                />
+              ))}
+            </List.Accordion>
+        </Surface> 
+        */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -223,43 +219,88 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  center: { // Added style for centering loading/error states
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: { // Added style
+    marginTop: 10,
+    fontSize: 16,
+  },
+  errorText: { // Added style
+    color: 'red',
+    textAlign: 'center',
+    fontSize: 16,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    // Removed border bottom, Stack navigator usually handles this
   },
   title: {
-    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+    fontWeight: 'bold',
   },
   content: {
     flex: 1,
+    padding: 15,
   },
   section: {
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 15, // Add space between sections if needed
+    elevation: 3, // Add shadow for Surface
   },
   medicineName: {
-    fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 5,
+    fontWeight: 'bold',
+  },
+  rxcuiText: { // Added style
+    marginBottom: 15,
+    color: 'gray',
+    fontSize: 12,
   },
   reorderButton: {
-    marginBottom: 16,
+    marginTop: 10,
+    marginBottom: 15,
   },
   divider: {
-    marginBottom: 16,
+    marginVertical: 15,
   },
   infoSection: {
-    marginBottom: 16,
+    marginBottom: 15,
   },
   sectionTitle: {
-    fontWeight: '600',
-    marginBottom: 8,
+    fontWeight: 'bold',
+    marginBottom: 5,
   },
   listItem: {
-    marginLeft: 8,
-    marginBottom: 4,
+    marginLeft: 10, // Indent list items
+    marginBottom: 3,
+  },
+  headerInfo: { // Added style for header details layout
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginBottom: 15,
+    marginTop: 5,
+    gap: 8, // Gap between items
+  },
+  chip: { // Style for Chips
+    height: 28, // Smaller chip
+    alignItems: 'center',
+  },
+  chipText: { // Style for text inside Chip
+     fontSize: 11, 
+  },
+   deaChip: { // Specific style for DEA chip
+    backgroundColor: '#fdeded', // Light red background
+  },
+  scrollContentContainer: { // Added for padding at the bottom
+    paddingBottom: 20, 
   },
 }); 

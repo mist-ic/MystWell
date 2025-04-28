@@ -1,18 +1,21 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Req, Inject, Query, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Req, Inject, Query, HttpCode, HttpStatus, ParseUUIDPipe, Logger } from '@nestjs/common';
 import { RecordingService, Recording } from './recording.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { Request } from 'express';
 import { User } from '@supabase/supabase-js'; // Import User type
+import { IsString, IsNumber, IsOptional } from 'class-validator'; // Import decorators
 
 // DTOs for request body validation (optional but recommended)
-class UploadUrlDto {
-  title: string;
-  duration: number; // Duration in seconds
-}
-
 class UpdateStatusDto {
+  @IsString()
   status: string;
+
+  @IsOptional()
+  @IsNumber()
   duration?: number; // Add optional duration
+
+  @IsOptional()
+  @IsString()
   error?: string;
 }
 
@@ -23,6 +26,8 @@ class UpdateTitleDto {
 @Controller('recordings')
 @UseGuards(AuthGuard) // Protect all routes in this controller
 export class RecordingController {
+  private readonly logger = new Logger(RecordingController.name);
+
   constructor(private readonly recordingService: RecordingService) {}
 
   private getUserIdFromRequest(req: Request): string {
@@ -62,9 +67,9 @@ export class RecordingController {
    */
   @Post('upload-url')
   @HttpCode(HttpStatus.OK) // Explicitly set OK status for POST
-  async getUploadUrl(@Req() req: Request, @Body() body: UploadUrlDto): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
+  async getUploadUrl(@Req() req: Request): Promise<{ uploadUrl: string; storagePath: string; recordingId: string }> {
     const userId = this.getUserIdFromRequest(req);
-    return this.recordingService.getUploadUrl(userId, body.title, body.duration);
+    return this.recordingService.getUploadUrl(userId);
   }
 
   /**
@@ -78,6 +83,7 @@ export class RecordingController {
       @Body() body: UpdateStatusDto,
       @Req() req: Request 
     ): Promise<Recording> {
+     this.logger.log(`[updateStatus] Received request for ID: ${id}, Body: ${JSON.stringify(body)}`); 
      const userId = this.getUserIdFromRequest(req);
      // Pass userId for potential ownership check within the service method
      // Pass status, error, and optional duration
@@ -130,16 +136,5 @@ export class RecordingController {
     ): Promise<Recording> {
       const userId = this.getUserIdFromRequest(req);
       return this.recordingService.retryTranscription(userId, id);
-  }
-
-  /**
-   * DEBUG ENDPOINT: Check if any recordings exist in the database
-   * This is temporary and should be removed after debugging
-   * TODO: Remove this endpoint before deploying to production
-   */
-  @Get('debug/check-recordings')
-  async debugCheckRecordings(): Promise<{ message: string }> {
-    await this.recordingService.debugCheckRecordings();
-    return { message: 'Debug check executed. See server logs for results.' };
   }
 } 

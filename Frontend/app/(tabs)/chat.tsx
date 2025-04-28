@@ -7,73 +7,113 @@ import {
   TouchableOpacity,
   Platform,
   Keyboard,
-  ListRenderItem,
   KeyboardAvoidingView,
   InputAccessoryView,
   Animated,
   EmitterSubscription,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Text, useTheme, Portal, Snackbar, Button } from 'react-native-paper';
+import { Text, useTheme, Snackbar, Surface, Avatar, Button, Divider, List, IconButton, TextInput as PaperTextInput, Modal, Title } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { MessageSkeleton } from '../../components/MessageSkeleton';
+import { MessageSkeleton } from '@/components/MessageSkeleton';
+import { useChatWebSocket, ChatMessage as HookChatMessage, ChatSession } from '@/hooks/useChatWebSocket';
 
-interface ChatMessage {
-  id: string;
-  text: string;
-  isUser: boolean;
-  status?: 'sending' | 'error' | 'sent';
-  timestamp: number;
+// --- Renamed local interface to avoid conflict with imported type ---
+interface DisplayMessage extends HookChatMessage {
+  // Add any UI-specific properties if needed later
+  // For now, it matches the hook's type
+  status?: 'sending' | 'error' | 'sent'; // Keep UI status for user messages
 }
 
 const INPUT_HEIGHT = 56;
 const INPUT_CONTAINER_HEIGHT = Platform.OS === 'ios' ? 80 : 64;
 
+// Typing Indicator component - can be enhanced to use hook state
+const TypingIndicator = () => {
+  const theme = useTheme();
+  // For now, keep simple animation. Could connect to hook's loading state later.
+  const [dots, setDots] = useState(1);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(prev => prev < 3 ? prev + 1 : 1);
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <View style={[styles.typingContainer, { backgroundColor: theme.colors.surfaceVariant }]}>
+      <Text style={{ color: theme.colors.onSurfaceVariant }}>
+        Mist is typing{dots === 1 ? '.' : dots === 2 ? '..' : '...'}
+      </Text>
+    </View>
+  );
+};
+
+// Message Timestamp component
+const MessageTime = ({ timestamp }: { timestamp: string }) => { // Expect ISO string now
+  const theme = useTheme();
+  // Use timestamp directly if it's already formatted, or parse if needed
+  // Assuming ISO string, let's format it
+  const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <Text style={[styles.timeText, { color: theme.colors.onSurfaceVariant }]}>
+      {time}
+    </Text>
+  );
+};
+
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // --- Chat Hook ---
+  const {
+    sessions,           // List of available sessions
+    activeSessionId,    // ID of the currently active session
+    setActiveSession, // Function to switch active session
+    createSession,      // Function to create a new session
+    messages,           // Messages for the active session
+    isConnected,
+    isLoading: isLoadingChat, // Combined loading state from hook
+    error: chatError,        // Error state from hook
+    sendMessage,         // Renamed function from hook
+  } = useChatWebSocket();
+
+  // --- UI State ---
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isTyping, setIsTyping] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
+  const [uiError, setUiError] = useState<string | null>(null);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const inputHeightRef = useRef(new Animated.Value(INPUT_HEIGHT));
+  const [sessionModalVisible, setSessionModalVisible] = useState(false);
+  const [newSessionTitle, setNewSessionTitle] = useState('');
 
-  // Theme-dependent styles
+  // --- Reinstate themedStyles ---
   const themedStyles = {
     container: {
       backgroundColor: theme.colors.background,
     },
     header: {
-      backgroundColor: theme.colors.background,
+      backgroundColor: theme.colors.surface,
+      borderBottomColor: theme.colors.surfaceVariant,
     },
     content: {
       backgroundColor: theme.colors.background,
-    },
-    aiAvatar: {
-      backgroundColor: theme.colors.primary,
-    },
-    aiAvatarText: {
-      color: theme.colors.onPrimary,
-    },
-    messageContent: {
-      backgroundColor: theme.colors.surfaceVariant,
     },
     userMessageContent: {
       backgroundColor: theme.colors.primary,
     },
     aiMessageContent: {
       backgroundColor: theme.colors.surfaceVariant,
-    },
-    messageText: {
-      color: theme.colors.onSurfaceVariant,
     },
     userMessageText: {
       color: theme.colors.onPrimary,
@@ -88,13 +128,12 @@ export default function ChatScreen() {
       color: theme.colors.error,
     },
     bottomContainer: {
-      backgroundColor: theme.colors.background,
-      borderTopColor: theme.colors.outlineVariant,
+      backgroundColor: theme.colors.surface,
+      borderTopColor: theme.colors.surfaceVariant,
     },
     input: {
       color: theme.colors.onSurface,
       backgroundColor: theme.colors.surfaceVariant,
-      borderRadius: 20,
     },
     inputAccessory: {
       backgroundColor: theme.colors.surfaceVariant,
@@ -108,30 +147,39 @@ export default function ChatScreen() {
     },
   };
 
-  // Load initial messages
+  // --- Derived State ---
+  const displayMessages: DisplayMessage[] = messages.map(msg => ({
+      ...msg,
+      status: 'sent' 
+  }));
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+
+  // --- Effects ---
+
+  // Handle chat hook errors
   useEffect(() => {
-    const loadInitialMessages = async () => {
-      try {
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setMessages([{
-          id: "1",
-          text: "Hello! I'm MystBuddy, your health assistant. How can I help you today?",
-          isUser: false,
-          status: 'sent',
-          timestamp: Date.now(),
-        }]);
-      } catch (err) {
-        setError('Failed to load messages. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    if (chatError) {
+      setUiError(chatError);
+      setSnackbarVisible(true);
+    } 
+    // Don't clear uiError here automatically, let user dismiss snackbar
+  }, [chatError]);
 
-    loadInitialMessages();
-  }, []);
+  // Mock Typing Indicator (remains the same)
+  useEffect(() => {
+    if (messages.length > 0) {
+        const lastMessage = messages[messages.length - 1];
+        if(lastMessage.sender === 'user' && !isTyping) {
+            setIsTyping(true);
+            const timer = setTimeout(() => setIsTyping(false), 1500);
+            return () => clearTimeout(timer);
+        } else if (lastMessage.sender === 'bot' && isTyping) {
+            setIsTyping(false);
+        }
+    }
+  }, [messages, isTyping]);
 
-  // Handle keyboard events
+  // Keyboard handling (remains the same)
   useEffect(() => {
     let keyboardWillShowListener: EmitterSubscription;
     let keyboardWillHideListener: EmitterSubscription;
@@ -165,448 +213,475 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const loadMessages = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      // Fetch messages implementation
-      const response = await fetch('/api/messages');
-      if (!response.ok) throw new Error('Failed to load messages');
-      const data = await response.json();
-      setMessages(data);
-    } catch (err) {
-      setError('Failed to load messages. Please try again.');
-    } finally {
-      setIsLoading(false);
+  // Scroll to end (remains the same)
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, []);
+  }, [messages, keyboardHeight]);
 
-  const handleSendMessage = async (text: string) => {
-    const tempId = Date.now().toString();
-    const newMessage: ChatMessage = {
-      id: tempId,
-      text,
-      isUser: true,
-      status: 'sending',
-      timestamp: Date.now(),
-    };
+  // --- Handlers ---
 
-    setMessages(prev => [...prev, newMessage]);
-
-    try {
-      // Send message implementation
-      const response = await fetch('/api/messages', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      });
-      
-      if (!response.ok) throw new Error('Failed to send message');
-      
-      const data = await response.json();
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === tempId 
-            ? { ...msg, id: data.id, status: 'sent' }
-            : msg
-        )
-      );
-    } catch (err) {
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === tempId 
-            ? { ...msg, status: 'error' }
-            : msg
-        )
-      );
-      setError('Failed to send message. Tap to retry.');
+  const handleSendMessage = () => {
+    const messageText = input.trim();
+    if (!messageText) return;
+    if (!isConnected || !activeSessionId) {
+        setUiError(activeSessionId ? "Not connected to chat server." : "No chat session selected.");
+        setSnackbarVisible(true);
+        return;
     }
+    setInput('');
+    sendMessage(messageText); // Hook now sends to active session
+    Animated.timing(inputHeightRef.current, { toValue: INPUT_HEIGHT, duration: 150, useNativeDriver: false }).start();
   };
 
-  const handleRetry = async (messageId: string) => {
-    const messageToRetry = messages.find(msg => msg.id === messageId);
-    if (!messageToRetry) return;
-
-    setRetryingMessageId(messageId);
-    try {
-      await handleSendMessage(messageToRetry.text);
-      setMessages(prev => prev.filter(msg => msg.id !== messageId));
-    } finally {
-      setRetryingMessageId(null);
-    }
+  const handleSelectSession = (sessionId: string) => {
+      setActiveSession(sessionId);
+      setSessionModalVisible(false);
   };
 
-  const renderMessage = ({ item: message }: { item: ChatMessage }) => (
-    <View style={[styles.messageContainer, message.isUser ? styles.userMessageContainer : styles.aiMessageContainer]}>
-      <TouchableOpacity
-        onPress={() => message.status === 'error' && handleRetry(message.id)}
-        disabled={message.status !== 'error'}
-        style={styles.messageBubble}
-      >
-        <Text style={[
-          styles.messageText,
-          message.status === 'error' && styles.errorText
-        ]}>
-          {message.text}
-        </Text>
-        {message.status === 'error' && (
-          <Text style={styles.retryText}>Tap to retry</Text>
+  const handleCreateNewSession = () => {
+      createSession(newSessionTitle.trim() || undefined); // Pass title or let backend default
+      setNewSessionTitle('');
+      setSessionModalVisible(false);
+  };
+
+  // --- Render Functions ---
+
+  const renderMessage = ({ item: message }: { item: DisplayMessage }) => {
+    const isUser = message.sender === 'user';
+    const showAvatar = !isUser && (messages.findIndex(m => m.id === message.id) === 0 || messages[messages.findIndex(m => m.id === message.id) - 1]?.sender === 'user');
+
+    return (
+      <View style={[
+        styles.messageRow,
+        isUser ? styles.userMessageRow : styles.aiMessageRow
+      ]}>
+        {!isUser && (
+            <Avatar.Image
+              size={28}
+              source={require('@/assets/images/icon.png')} // Replace with your Mist avatar path
+              style={[styles.avatar, showAvatar ? {} : { opacity: 0 }]}
+            />
         )}
-        {(message.status === 'sending' || retryingMessageId === message.id) && (
-          <ActivityIndicator size="small" style={styles.sendingIndicator} />
+        <Surface
+          style={[
+            styles.messageContent,
+            isUser ? [styles.userMessageContent, themedStyles.userMessageContent] : [styles.aiMessageContent, themedStyles.aiMessageContent],
+            message.status === 'error' ? themedStyles.errorMessage : {},
+          ]}
+          elevation={1}
+        >
+          <Text style={isUser ? themedStyles.userMessageText : themedStyles.aiMessageText}>
+            {message.text}
+          </Text>
+          <View style={styles.timeContainer}>
+            <MessageTime timestamp={message.timestamp} />
+            {/* Add status icons if needed */}
+          </View>
+          {message.status === 'error' && (
+            <TouchableOpacity onPress={() => console.warn("Retry not implemented yet with WS") /* handleRetry(message.id) */}>
+              <Text style={[styles.retryText, themedStyles.retryText]}>Retry</Text>
+            </TouchableOpacity>
+          )}
+        </Surface>
+         {isUser && (
+             <View style={{width: 28}} /> // Spacer to align user messages
         )}
-      </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderEmpty = () => (
+    <View style={[styles.emptyContainer, styles.centerAlign]}>
+        {isLoadingChat ? (
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+        ) : !activeSessionId ? (
+            <View style={styles.centerAlign}>
+                 <MaterialCommunityIcons name="chat-plus-outline" size={48} color={theme.colors.onSurfaceVariant} style={styles.marginBottom} />
+                 <Text style={[styles.emptyText, themedStyles.emptyText, styles.marginBottom]}>
+                    No chat selected.
+                 </Text>
+                 <Button mode="contained" onPress={() => setSessionModalVisible(true)}>Select or Start Chat</Button>
+             </View>
+        ) : (
+            <Text style={[styles.emptyText, themedStyles.emptyText]}>
+                Send a message to start chatting with Mist.
+            </Text>
+        )}
     </View>
   );
 
-  const handleInputSizeChange = useCallback((event: { nativeEvent: { contentSize: { height: number } } }) => {
-    const { height } = event.nativeEvent.contentSize;
-    const newHeight = Math.min(Math.max(INPUT_HEIGHT, height), INPUT_HEIGHT * 3);
-    Animated.timing(inputHeightRef.current, {
-      toValue: newHeight,
-      duration: 100,
-      useNativeDriver: false,
-    }).start();
-  }, []);
+  const renderFooter = () => {
+    if (isTyping) return <TypingIndicator />;
+    if (!isConnected && !isLoadingChat && activeSessionId) {
+        return <Text style={styles.connectionStatus}>Disconnected. Trying to reconnect...</Text>;
+    }
+    return null;
+  };
 
-  const inputAccessoryViewID = 'uniqueID';
+  const renderSessionItem = ({ item }: { item: ChatSession }) => (
+      <List.Item
+          title={item.title || `Chat from ${new Date(item.created_at).toLocaleDateString()}`}
+          description={`Started: ${new Date(item.created_at).toLocaleString()}`}
+          left={props => <List.Icon {...props} icon="chat-outline" />}
+          onPress={() => handleSelectSession(item.id)}
+          style={item.id === activeSessionId ? styles.activeSessionItem : {}}
+      />
+  );
 
-  const renderInputAccessory = useCallback(() => {
-    if (Platform.OS !== 'ios') return null;
+  const inputAccessoryViewID = 'chatInputAccessory';
 
-    return (
-      <InputAccessoryView nativeID={inputAccessoryViewID}>
-        <View style={styles.inputAccessory}>
-          <TouchableOpacity onPress={() => Keyboard.dismiss()}>
-            <Text style={styles.doneButton}>Done</Text>
-          </TouchableOpacity>
-        </View>
-      </InputAccessoryView>
-    );
-  }, []);
-
+  // --- Main Return ---
   return (
     <ErrorBoundary>
-      <KeyboardAvoidingView 
-        style={[styles.container, themedStyles.container, { paddingTop: insets.top }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
-        <StatusBar style="dark" />
-        <View style={[styles.header, themedStyles.header]}>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="Menu"
-            accessibilityHint="Opens the navigation menu"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="menu" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-          <Text 
-            style={[styles.headerTitle, { color: theme.colors.onSurface }]}
-            accessibilityRole="header"
-          >
-            MystBuddy
-          </Text>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="Edit preferences"
-            accessibilityHint="Opens chat preferences"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="square-edit-outline" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerButton}
-            accessible={true}
-            accessibilityLabel="More options"
-            accessibilityHint="Shows additional chat options"
-            accessibilityRole="button"
-          >
-            <MaterialCommunityIcons name="dots-vertical" size={24} color={theme.colors.onSurface} />
-          </TouchableOpacity>
-        </View>
+      <Surface style={[styles.container, themedStyles.container, { paddingBottom: Platform.OS === 'ios' ? keyboardHeight : 0 }]}>
+        <StatusBar style={theme.dark ? 'light' : 'dark'} />
         
-        {error && (
-          <Snackbar
-            visible={!!error}
-            onDismiss={() => setError(null)}
-            action={{
-              label: 'Retry',
-              onPress: loadMessages,
-            }}
-          >
-            {error}
-          </Snackbar>
-        )}
-        
+        {/* Header with Session Selection */}
+        <Surface style={[styles.header, themedStyles.header, { paddingTop: insets.top }]} elevation={2}>
+            <View style={styles.headerContent}>
+                 <Text style={styles.headerTitle} numberOfLines={1}>
+                    {activeSession ? (activeSession.title || 'Chat with Mist') : 'Select Chat'}
+                 </Text>
+                 <IconButton 
+                    icon="chat-plus-outline"
+                    size={24}
+                    onPress={() => setSessionModalVisible(true)}
+                    />
+             </View>
+        </Surface>
+
+        {/* Chat Message List */}
         <FlatList
-          data={messages}
+          ref={flatListRef}
+          data={displayMessages} // Use derived state
           renderItem={renderMessage}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.messagesContainer}
-          ListEmptyComponent={() => (
-            isLoading ? (
-              <>
-                <MessageSkeleton />
-                <MessageSkeleton isUser />
-                <MessageSkeleton />
-              </>
-            ) : null
-          )}
-          refreshControl={
-            <RefreshControl
-              refreshing={isLoading}
-              onRefresh={loadMessages}
-            />
-          }
+          keyExtractor={(item) => item.id}
+          style={[styles.content, themedStyles.content]}
+          contentContainerStyle={styles.contentContainer}
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={renderFooter}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
         />
+
+        {/* Input Area */} 
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined} // Use undefined for android to avoid issues
+          keyboardVerticalOffset={Platform.OS === 'ios' ? INPUT_CONTAINER_HEIGHT + insets.top + 60 : 0} // Adjust offset based on header
+        >
+            <Surface 
+                style={[styles.bottomContainer, themedStyles.bottomContainer, { paddingBottom: insets.bottom }]} 
+                elevation={4}
+            >
+                <Animated.View style={[styles.inputRow, { height: inputHeightRef.current }]}>
+                    <TextInput
+                        ref={inputRef}
+                        style={[styles.input, themedStyles.input]}
+                        value={input}
+                        onChangeText={setInput}
+                        placeholder={activeSessionId ? "Ask Mist anything..." : "Select a chat first"}
+                        placeholderTextColor={theme.colors.onSurfaceVariant}
+                        multiline
+                        onContentSizeChange={(e) => {
+                            const newHeight = Math.max(INPUT_HEIGHT, Math.min(e.nativeEvent.contentSize.height, 120)); 
+                            Animated.timing(inputHeightRef.current, {
+                                toValue: newHeight,
+                                duration: 100,
+                                useNativeDriver: false,
+                            }).start();
+                        }}
+                        blurOnSubmit={false}
+                        onSubmitEditing={handleSendMessage}
+                        returnKeyType="send"
+                        editable={isConnected && !!activeSessionId && !isLoadingChat} // Enable only if connected and session selected
+                        inputAccessoryViewID={inputAccessoryViewID} 
+                    />
+                    <TouchableOpacity
+                        onPress={handleSendMessage}
+                        style={styles.sendButtonContainer}
+                        disabled={!input.trim() || !isConnected || !activeSessionId || isLoadingChat}
+                    >
+                        <MaterialCommunityIcons
+                        name="send"
+                        size={24}
+                        color={!input.trim() || !isConnected || !activeSessionId || isLoadingChat ? theme.colors.onSurfaceDisabled : theme.colors.primary}
+                        />
+                    </TouchableOpacity>
+                </Animated.View>
+            </Surface>
+        </KeyboardAvoidingView>
         
-        <Animated.View style={[
-          styles.bottomContainer,
-          themedStyles.bottomContainer,
-          { height: inputHeightRef.current }
-        ]}>
-          <View style={styles.inputContainer}>
-            <View style={styles.inputRow}>
-              <TouchableOpacity 
-                style={styles.actionButton} 
-                onPress={() => inputRef.current?.focus()}
-                accessible={true}
-                accessibilityLabel="Search messages"
-                accessibilityHint="Search through chat history"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="magnify" size={24} color={theme.colors.onSurfaceVariant} />
-              </TouchableOpacity>
-              <TextInput
-                ref={inputRef}
-                style={[styles.input, themedStyles.input]}
-                value={input}
-                onChangeText={setInput}
-                placeholder="Ask anything"
-                placeholderTextColor={theme.colors.onSurfaceVariant}
-                multiline
-                maxLength={1000}
-                returnKeyType="send"
-                onSubmitEditing={() => handleSendMessage(input)}
-                blurOnSubmit={false}
-                onContentSizeChange={handleInputSizeChange}
-                inputAccessoryViewID={inputAccessoryViewID}
-                editable={!isLoading}
-                accessible={true}
-                accessibilityLabel="Message input"
-                accessibilityHint="Type your message here"
-                accessibilityRole="textbox"
-              />
-              <TouchableOpacity 
-                style={styles.actionButton}
-                accessible={true}
-                accessibilityLabel="Start voice input"
-                accessibilityHint="Record your message using voice"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="microphone" size={24} color={theme.colors.onSurfaceVariant} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[
-                  styles.sendButton,
-                  !input.trim() && styles.sendButtonDisabled,
-                  { backgroundColor: input.trim() ? theme.colors.primary : theme.colors.surfaceVariant }
-                ]}
-                onPress={() => handleSendMessage(input)}
-                disabled={!input.trim() || isLoading}
-                accessible={true}
-                accessibilityLabel="Send message"
-                accessibilityHint={!input.trim() ? "Type a message first" : "Send your message"}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !input.trim() || isLoading }}
-              >
-                <MaterialCommunityIcons 
-                  name="send" 
-                  size={24} 
-                  color={input.trim() ? theme.colors.onPrimary : theme.colors.onSurfaceVariant} 
-                />
-              </TouchableOpacity>
-            </View>
+        {/* iOS Keyboard Done Button */}
+        {Platform.OS === 'ios' && (
+            <InputAccessoryView nativeID={inputAccessoryViewID}>
+              <View style={[styles.inputAccessory, themedStyles.inputAccessory]}>
+                <TouchableOpacity onPress={() => Keyboard.dismiss()}>
+                    <Text style={[styles.doneButton, themedStyles.doneButton]}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </InputAccessoryView>
+        )}
+
+        {/* Session Selection Modal */}
+        <Modal
+          onDismiss={() => setSessionModalVisible(false)}
+          visible={sessionModalVisible}
+          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
+        >
+          <Title style={styles.modalTitle}>Chat Sessions</Title>
+          <IconButton
+            icon="close"
+            size={24}
+            onPress={() => setSessionModalVisible(false)}
+            style={{ position: 'absolute', top: 10, right: 10 }}
+          />
+
+          <Divider style={styles.divider} />
+
+          <View style={styles.newSessionInputContainer}>
+            <PaperTextInput 
+              label="New Chat Title (Optional)"
+              value={newSessionTitle}
+              onChangeText={setNewSessionTitle}
+              mode="outlined"
+              dense
+              style={styles.modalInput}
+            />
+            <Button mode="contained" onPress={handleCreateNewSession} style={styles.modalButton} labelStyle={styles.modalButtonLabel}>
+              Start New Chat
+            </Button>
           </View>
-        </Animated.View>
-        {renderInputAccessory()}
-      </KeyboardAvoidingView>
+          
+          <Text style={styles.modalSubtitle}>Existing Chats</Text>
+          {isLoadingChat && !sessions.length ? (
+            <ActivityIndicator style={styles.marginTop} />
+          ) : sessions.length === 0 ? (
+            <Text style={styles.modalEmptyText}>No previous chats found.</Text>
+          ) : (
+            <FlatList
+              data={sessions}
+              renderItem={renderSessionItem}
+              keyExtractor={(item) => item.id}
+              style={styles.sessionList}
+            />
+          )}
+        </Modal>
+
+        {/* Snackbar for Errors */}
+        <Snackbar
+          visible={snackbarVisible}
+          onDismiss={() => setSnackbarVisible(false)}
+          action={{
+            label: 'Dismiss',
+            onPress: () => setSnackbarVisible(false),
+          }}
+          duration={Snackbar.DURATION_MEDIUM}
+          style={{ backgroundColor: theme.colors.errorContainer, bottom: insets.bottom + (Platform.OS === 'ios' ? INPUT_CONTAINER_HEIGHT : 60) }} // Adjust bottom position
+        >
+          <Text style={{ color: theme.colors.onErrorContainer }}>{uiError || "An error occurred"}</Text>
+        </Snackbar>
+      </Surface>
     </ErrorBoundary>
   );
 }
 
+// --- Styles (MERGED and Cleaned) ---
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
   header: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    zIndex: 10,
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    height: 56,
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-  headerButton: {
-    padding: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    height: 60,
   },
   headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
     flex: 1,
-    fontSize: 20,
-    fontWeight: '600',
-    marginLeft: 16,
+    marginHorizontal: 10,
   },
   content: {
     flex: 1,
   },
-  messageList: {
-    flex: 1,
+  contentContainer: {
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 10,
+    flexGrow: 1,
   },
-  messageListContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  messageBubble: {
+  messageRow: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 10,
     alignItems: 'flex-end',
-    width: '100%',
   },
-  userBubble: {
+  userMessageRow: {
     justifyContent: 'flex-end',
-    flexDirection: 'row-reverse',
   },
-  aiBubble: {
+  aiMessageRow: {
     justifyContent: 'flex-start',
   },
-  avatarContainer: {
+  avatar: {
     marginRight: 8,
-  },
-  aiAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  aiAvatarText: {
-    fontSize: 14,
-    fontWeight: '600',
+    marginBottom: 5,
   },
   messageContent: {
-    maxWidth: '70%',
-    borderRadius: 20,
-    padding: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    maxWidth: '80%',
   },
   userMessageContent: {
-    alignSelf: 'flex-end',
-    marginRight: 0,
+    borderBottomRightRadius: 4,
   },
   aiMessageContent: {
-    alignSelf: 'flex-start',
-    marginLeft: 0,
+    borderBottomLeftRadius: 4,
   },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 20,
+  timeContainer: {
+      alignSelf: 'flex-end',
+      marginTop: 4,
   },
-  messageStatus: {
-    marginTop: 4,
+  timeText: {
+      fontSize: 10,
+      opacity: 0.7,
   },
   errorMessage: {
     borderWidth: 1,
   },
-  retryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
   retryText: {
-    fontSize: 12,
-    marginLeft: 4,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 32,
-  },
-  emptyText: {
-    fontSize: 16,
+      fontSize: 12,
+      marginTop: 4,
+      fontWeight: 'bold',
+      alignSelf: 'flex-end',
   },
   bottomContainer: {
-    width: '100%',
-    borderTopWidth: 1,
-  },
-  inputContainer: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 5,
+    paddingTop: 5,
   },
   inputRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  actionButton: {
-    padding: 8,
-    marginBottom: 4,
+    alignItems: 'center',
   },
   input: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 20,
-    maxHeight: INPUT_HEIGHT * 3,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginHorizontal: 8,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
+    minHeight: INPUT_HEIGHT,
+    maxHeight: 120,
     borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 4,
+    paddingHorizontal: 15,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    fontSize: 16,
+    marginRight: 10,
   },
-  sendButtonDisabled: {
-    opacity: 0.7,
+  sendButtonContainer: {
+    padding: 8,
+  },
+  typingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    marginHorizontal: 10,
+    marginBottom: 10,
+    borderRadius: 18,
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+  },
+  typingAvatar: {
+      marginRight: 8,
+  },
+  emptyContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  centerAlign: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+  },
+  marginBottom: {
+       marginBottom: 16,
+  },
+  marginTop: {
+       marginTop: 16,
+  },
+  emptyText: {
+      textAlign: 'center',
+      fontSize: 16,
   },
   inputAccessory: {
-    height: 44,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    paddingHorizontal: 16,
+      height: 44,
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
   },
   doneButton: {
-    fontSize: 17,
+    fontWeight: '600',
+    fontSize: 16,
   },
-  errorText: {
-    color: 'red',
+  connectionStatus: {
+      textAlign: 'center',
+      paddingVertical: 4,
+      fontSize: 12,
+      fontStyle: 'italic',
+      opacity: 0.8,
   },
-  sendingIndicator: {
-    marginLeft: 8,
+  modalContainer: {
+      padding: 20,
+      margin: 20, // Keep margin for spacing from screen edges
+      borderRadius: 8,
+      maxHeight: '80%',
+      // Remove background color here, apply inline instead
+      // backgroundColor: theme.colors.surface,
   },
-  messageContainer: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    alignItems: 'flex-end',
-    width: '100%',
+  modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      marginBottom: 15,
   },
-  userMessageContainer: {
-    justifyContent: 'flex-end',
-    flexDirection: 'row-reverse',
+  modalSubtitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginTop: 15,
+      marginBottom: 10,
   },
-  aiMessageContainer: {
-    justifyContent: 'flex-start',
+  newSessionInputContainer: {
+      marginBottom: 15,
   },
-  messagesContainer: {
-    padding: 16,
-    paddingBottom: 32,
+  modalInput: {
+      marginBottom: 10,
   },
-}); 
+  modalButton: {
+      paddingVertical: 4,
+  },
+  modalButtonLabel: {
+      fontSize: 14,
+  },
+  divider: {
+      marginVertical: 10,
+  },
+  modalEmptyText: {
+      textAlign: 'center',
+      marginTop: 20,
+      fontStyle: 'italic',
+  },
+  sessionList: {
+      maxHeight: '50%',
+  },
+  activeSessionItem: {
+      backgroundColor: 'rgba(0, 0, 0, 0.05)',
+  },
+});

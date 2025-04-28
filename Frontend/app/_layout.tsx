@@ -10,6 +10,8 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { theme } from '@/theme';
 import { AuthProvider, useAuth } from '@/context/auth';
+import { SupabaseProvider } from '@/context/SupabaseProvider';
+import { DocumentModalProvider } from '@/context/DocumentModalContext';
 
 // Import Inter fonts
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
@@ -48,8 +50,7 @@ function InitialLayout() {
 
 export default function RootLayout() {
   // Load fonts, including Inter
-  const [fontsLoaded, fontError] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+  const [fontsLoaded] = useFonts({
     'Inter-Regular': Inter_400Regular,
     'Inter-Medium': Inter_500Medium,
     'Inter-SemiBold': Inter_600SemiBold,
@@ -57,33 +58,45 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    // Hide splash screen once fonts are loaded OR if there's an error
-    if (fontsLoaded || fontError) {
+    // Hide splash screen once fonts are loaded
+    if (fontsLoaded) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded]);
 
   // Optional: Log font loading error
   useEffect(() => {
-    if (fontError) {
-      console.error("Font Loading Error:", fontError);
+    if (!fontsLoaded) {
+      console.error("Font Loading Error: Fonts not loaded");
       // Potentially handle the error, e.g., show an error message
     }
-  }, [fontError]);
+  }, [fontsLoaded]);
 
-  // Render loading/null state until fonts are loaded (or error occurs)
-  if (!fontsLoaded && !fontError) {
-    return null; 
+  // Show loading screen while fonts are loading
+  if (!fontsLoaded) {
+    // Return a simple loading view instead of SplashScreen component
+    return (
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: '#fff' 
+      }} />
+    );
   }
 
   // Fonts are loaded (or error handled), render the app
   return (
-    <AuthProvider>
-      <PaperProvider theme={theme}>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <InitialLayout />
-        </ThemeProvider>
-      </PaperProvider>
-    </AuthProvider>
+    <SupabaseProvider>
+      <AuthProvider>
+        <DocumentModalProvider>
+          <PaperProvider theme={theme}>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <InitialLayout />
+            </ThemeProvider>
+          </PaperProvider>
+        </DocumentModalProvider>
+      </AuthProvider>
+    </SupabaseProvider>
   );
 }
