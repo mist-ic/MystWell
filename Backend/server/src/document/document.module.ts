@@ -25,14 +25,12 @@ import { ProfileModule } from '../profile/profile.module'; // Import ProfileModu
       useFactory: async (configService: ConfigService) => ({
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-          // Add keepAlive options
+          port: configService.get<number>('REDIS_PORT', 6380), // Ensure default matches Azure (6380)
+          password: configService.get<string>('REDIS_PASSWORD'), // <-- Add password from env
+          tls: {}, // <-- Add this empty object to enable TLS/SSL
           showFriendlyErrorStack: true,
-          keepAlive: 60000, // 60 seconds
+          keepAlive: 60000,
           noDelay: true,
-          // Add password/TLS if needed for Azure Cache for Redis
-          // password: configService.get<string>('REDIS_PASSWORD'),
-          // tls: { servername: configService.get<string>('REDIS_HOST') }
         },
       }),
       inject: [ConfigService],

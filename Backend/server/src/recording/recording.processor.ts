@@ -112,7 +112,10 @@ export class RecordingProcessor extends WorkerHost {
         .eq('id', recordingId);
 
       // 4. Analyze with Gemini
-      const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(rawTranscript);
+      const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(
+          rawTranscript,
+          profileId
+      );
 
       if (!structuredDetails) {
         await this.recordingService.updateRecordingStatus(

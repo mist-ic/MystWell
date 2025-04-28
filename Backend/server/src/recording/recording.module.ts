@@ -22,7 +22,9 @@ import { SupabaseModule } from '../supabase/supabase.module'; // Import Supabase
       useFactory: async (configService: ConfigService) => ({
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
+          port: configService.get<number>('REDIS_PORT', 6380),
+          password: configService.get<string>('REDIS_PASSWORD'),
+          tls: {},
           showFriendlyErrorStack: true,
           keepAlive: 60000,
           noDelay: true,
