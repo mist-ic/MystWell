@@ -128,6 +128,7 @@ export class DocumentService {
         storagePath: document.storage_path, // Use the stored path
         documentId,
         profileId,
+        displayName: displayName // Pass the displayName to the job
       });
     } catch (queueError) {
       this.logger.error(`Failed to add job to queue for document ${documentId}: ${queueError.message}`);

@@ -229,7 +229,7 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
 });
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
+const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
 
 export default function RecordingDetailScreen() {
   const theme = useTheme();

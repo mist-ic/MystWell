@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, createContext, useContext } from 'react';
 import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
-import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button } from 'react-native-paper';
+import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button, MD3Theme } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { StatusItem } from '@/components/ui/StatusItem';
@@ -11,6 +11,7 @@ import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useDocumentModal } from '@/context/DocumentModalContext';
+import { useAuth } from '@/context/auth'; // Import useAuth
 
 // Define a type for reminders if not already defined
 interface Reminder {
@@ -68,11 +69,12 @@ const initialReminders: Reminder[] = [
 ];
 
 export default function HomeScreen() {
-  const theme = useTheme();
+  const theme = useTheme<MD3Theme>();
   const router = useRouter();
   const pathname = usePathname(); // Get current route path
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders);
   const { showAddDocumentModal } = useDocumentModal();
+  const { profile } = useAuth(); // Get profile from auth context
   
   // --- State for Modification Modal ---
   const [isModifyModalVisible, setIsModifyModalVisible] = useState(false);
@@ -225,7 +227,8 @@ export default function HomeScreen() {
         {/* Greeting */}
         <View style={styles.greetingContainer}>
           <Text variant="titleLarge" style={styles.greetingText}>
-            {greeting}, Poorav 👋
+            {/* Use profile name with fallback */}
+            {greeting}, {profile?.full_name || 'there'} 👋
           </Text>
         </View>
 
@@ -494,7 +497,7 @@ export default function HomeScreen() {
 }
 
 // Define the styles factory function outside the component
-const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
+const createStyles = (theme: MD3Theme) => StyleSheet.create({
   container: {
     flex: 1,
   },

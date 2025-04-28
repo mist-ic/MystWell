@@ -188,7 +188,7 @@ export class ChatService {
       } catch (error) {
           this.logger.error(`Failed to generate embedding: ${error.message}`, error.stack);
           return null; // Return null on error, don't block chat
-      }
+  }
   }
   // --- END: Generate Embedding --- 
 
@@ -364,7 +364,7 @@ export class ChatService {
         if (!finalResponse) {
             this.logger.error(`Chatbot error: No final response received from Gemini for session ${sessionId}.`);
             throw new Error('No final response received from Gemini');
-        }
+      }
 
         // Check for safety blocks in the *final* response
         const finalCandidate = finalResponse.candidates?.[0];
@@ -404,24 +404,24 @@ export class ChatService {
         return botResponseText;
 
     } catch (error) {
-        if (error instanceof NotFoundException) {
-            this.logger.error(`Session not found error for session ${sessionId}, profile ${profileId}: ${error.message}`);
-            return 'Error: Chat session not found.';
+       if (error instanceof NotFoundException) {
+           this.logger.error(`Session not found error for session ${sessionId}, profile ${profileId}: ${error.message}`);
+           return 'Error: Chat session not found.';
         } 
         if (error instanceof InternalServerErrorException) {
            // Specific handling if the search itself failed and threw
            this.logger.error(`Internal server error during chat for session ${sessionId}: ${error.message}`, error.stack);
            return 'Sorry, I encountered an internal error while processing your request.';
-        }
-       this.logger.error(
+       } 
+      this.logger.error(
          `Unhandled error during chat processing for session ${sessionId}:`,
-         error.message || error,
-         error.stack,
-       );
+        error.message || error,
+        error.stack,
+      );
        // Include check for Gemini API error details if present
-       if (error.response && error.response.promptFeedback) {
+      if (error.response && error.response.promptFeedback) {
            this.logger.error('Gemini Prompt Feedback:', error.response.promptFeedback);
-       }
+      }
        return 'Sorry, I encountered an unexpected error and could not process your request. Please try again later.';
     }
   }

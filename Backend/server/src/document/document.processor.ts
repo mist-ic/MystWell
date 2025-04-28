@@ -31,9 +31,9 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
     this.logger.log(`Processor for queue ${DOCUMENT_PROCESSING_QUEUE} initialized.`);
   }
 
-  async process(job: Job<{ storagePath: string; documentId: string; profileId: string }>): Promise<any> {
-    this.logger.log(`Processing job ${job.id} for document ${job.data.documentId}...`);
-    const { storagePath, documentId, profileId } = job.data;
+  async process(job: Job<{ storagePath: string; documentId: string; profileId: string; displayName: string }>): Promise<any> {
+    const { storagePath, documentId, profileId, displayName } = job.data; // Extract displayName
+    this.logger.log(`Starting job ${job.id} for document ${documentId} (path: ${storagePath}, profile: ${profileId}, displayName: ${displayName})`);
 
     try {
       // 1. Update status to processing (use supabaseAdmin)
@@ -218,18 +218,18 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       // ---> End Embedding Generation <--- 
 
       // 7. Update final status and save data (including embedding)
-      await this.updateDocumentStatus(documentId, 'processed', extractedJson, embeddingVector);
+      await this.updateDocumentStatus(documentId, 'processed', displayName, extractedJson, embeddingVector);
       this.logger.log(`Job ${job.id} completed successfully for document ${documentId}.`);
       return { success: true };
 
     } catch (error) {
       this.logger.error(`Job ${job.id} failed for document ${documentId}: ${error.message}`, error.stack);
-      await this.updateDocumentStatus(documentId, 'processing_failed', undefined, null, error.message);
+      await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, error.message);
       throw error;
     }
   }
 
-  private async updateDocumentStatus(documentId: string, status: string, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
+  private async updateDocumentStatus(documentId: string, status: string, displayName?: string | undefined, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
       const updateData: any = { 
           status,
           updated_at: new Date(),
@@ -244,6 +244,10 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           }
           if (embedding) { // Add embedding if available
              updateData.embedding = embedding;
+          }
+          // Only update displayName if status is processed and displayName is provided
+          if (displayName !== undefined) {
+              updateData.display_name = displayName;
           }
       } 
       // No need for separate check for processing_failed error message, handled above
