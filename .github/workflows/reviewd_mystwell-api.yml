@@ -1,10 +1,5 @@
-name: Build and deploy Node.js app to Azure Web App - mystwell-api
-
-on:
-  push:
-    branches:
-      - Reviewd
-  workflow_dispatch:
+\
+# ... existing code ...
 
 jobs:
   build:
@@ -20,28 +15,47 @@ jobs:
         with:
           node-version: '22.x'
 
-      - name: npm install and build
-        run: |
-          npm install
-          npm run build
+      # Step 1: Install ONLY production dependencies
+      - name: npm ci (production)
+        run: npm ci --omit=dev
         working-directory: Backend/server
-      
-      # Skip tests or make them non-blocking
-      - name: Run tests (non-blocking)
-        run: npm test || echo "Tests failed but continuing deployment"
-        working-directory: Backend/server
-  
-      - name: Zip Backend/server directory for deployment
-        run: |
-          cd Backend/server
-          zip -r ../../release.zip ./*
 
+      # Step 2: Build the application
+      - name: npm run build
+        run: npm run build
+        working-directory: Backend/server
+
+      # Step 3: Prepare artifact directory
+      - name: Create artifact directory structure
+        run: |
+          mkdir -p artifact/dist
+          mkdir -p artifact/node_modules
+        working-directory: Backend/server
+
+      # Step 4: Copy necessary files to artifact directory
+      - name: Copy production files to artifact directory
+        run: |
+          cp -r dist/* artifact/dist/
+          cp -r node_modules/* artifact/node_modules/
+          cp package.json artifact/
+          cp package-lock.json artifact/
+          # Add any other necessary runtime files here, e.g.:
+          # cp .env.production artifact/
+          # cp -r public artifact/  (if you have static assets)
+        working-directory: Backend/server
+
+      # Step 5: Zip the prepared artifact directory
+      - name: Zip artifact directory for deployment
+        run: |
+          cd Backend/server/artifact
+          zip -r ../../../release.zip ./*
+        # Note: Adjust zip path if needed based on where upload-artifact expects it
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: release.zip
+          path: release.zip # Upload the lean zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -58,9 +72,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
+          # It will download release.zip to the root of the runner workspace
 
-      - name: Unzip artifact for deployment
-        run: unzip release.zip
+      # Remove the unzip step - we deploy the zip directly
+      # - name: Unzip artifact for deployment
+      #   run: unzip release.zip
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -75,4 +91,6 @@ jobs:
         with:
           app-name: 'mystwell-api'
           slot-name: 'Production'
-          package: .
+          package: release.zip # Deploy the zip file directly
+          # Optional: Consider deployment-method: 'run-from-package' for potentially even faster deployments
+          # deployment-method: 'run-from-package'
