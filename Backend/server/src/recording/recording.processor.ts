@@ -82,7 +82,10 @@ export class RecordingProcessor extends WorkerHost {
       }
 
       // 3. Transcribe the audio
-      const rawTranscript = await this.speechToTextService.transcribeAudio(audioBytes);
+      const rawTranscript = await this.speechToTextService.transcribeAudio(
+          audioBytes,
+          profileId
+      );
 
       if (!rawTranscript) {
         await this.recordingService.updateRecordingStatus(

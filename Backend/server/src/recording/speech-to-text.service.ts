@@ -37,8 +37,11 @@ export class SpeechToTextService {
 
   async transcribeAudio(
     audioBytes: Buffer, // Accept Buffer instead of URI string
+    profileId: string, // <-- Add profileId parameter
   ): Promise<string | null> {
-    this.logger.log(`Starting V2 transcription for audio buffer (${audioBytes.length} bytes)`);
+    this.logger.log(
+      `Starting V2 transcription for profile ${profileId}, audio buffer (${audioBytes.length} bytes)` // <-- Update log
+    );
 
     const recognizerName = this.configService.get<string>(
       'GOOGLE_SPEECH_RECOGNIZER_NAME',
