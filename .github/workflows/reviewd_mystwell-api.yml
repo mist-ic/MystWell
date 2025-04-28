@@ -20,28 +20,38 @@ jobs:
         with:
           node-version: '22.x'
 
-      # Step 1: Install ONLY production dependencies
-      - name: npm ci (production)
-        run: npm ci --omit=dev
+      # Step 1: Install ALL dependencies (needed for build tools like @nestjs/cli)
+      - name: npm ci (all dependencies)
+        run: npm ci
         working-directory: Backend/server
 
-      # Step 2: Build the application
+      # Step 2: Build the application (uses dev dependencies)
       - name: npm run build
         run: npm run build
         working-directory: Backend/server
 
-      # Step 3: Prepare artifact directory
+      # Step 3: Remove development node_modules
+      - name: Remove development node_modules
+        run: rm -rf node_modules
+        working-directory: Backend/server
+
+      # Step 4: Install ONLY production dependencies
+      - name: npm ci (production only)
+        run: npm ci --omit=dev
+        working-directory: Backend/server
+
+      # Step 5: Prepare artifact directory
       - name: Create artifact directory structure
         run: |
           mkdir -p artifact/dist
           mkdir -p artifact/node_modules
         working-directory: Backend/server
 
-      # Step 4: Copy necessary files to artifact directory
+      # Step 6: Copy necessary files to artifact directory
       - name: Copy production files to artifact directory
         run: |
-          cp -r dist/* artifact/dist/
-          cp -r node_modules/* artifact/node_modules/
+          cp -r dist/* artifact/dist/ # Copy compiled code
+          cp -r node_modules/* artifact/node_modules/ # Copy production node_modules
           cp package.json artifact/
           cp package-lock.json artifact/
           # Add any other necessary runtime files here, e.g.:
@@ -49,7 +59,7 @@ jobs:
           # cp -r public artifact/  (if you have static assets)
         working-directory: Backend/server
 
-      # Step 5: Zip the prepared artifact directory
+      # Step 7: Zip the prepared artifact directory
       - name: Zip artifact directory for deployment
         run: |
           cd Backend/server/artifact
