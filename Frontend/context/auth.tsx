@@ -169,7 +169,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (error) throw error;
       // Profile will be fetched by onAuthStateChange listener
-      router.replace('/(tabs)'); 
     } catch (error) {
       console.error('Signin Error:', error);
       throw error;

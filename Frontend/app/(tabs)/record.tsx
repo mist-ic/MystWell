@@ -18,7 +18,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 // --- Configuration ---
 // TODO: Move this to a config file or environment variable
 // const API_BASE_URL = 'http://172.31.231.222:3000'; // Use the provided IP and default port
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
+const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
 
 // --- Types ---
 // Define Recording type based on backend structure

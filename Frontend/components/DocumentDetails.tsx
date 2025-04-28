@@ -10,7 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '../context/auth';
 import { WebView } from 'react-native-webview';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
+const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
 
 interface DocumentDetailsProps {
   document: DocumentInfo;

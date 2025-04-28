@@ -35,7 +35,8 @@ interface ChatHistoryData {
     history: { sender: string, text: string, timestamp: string }[];
 }
 
-const WEBSOCKET_URL = process.env.EXPO_PUBLIC_WS_URL || 'REDACTED_API_URL';
+// Hardcoded production WebSocket URL
+const WEBSOCKET_URL = 'REDACTED_WS_URL';
 const CHAT_HISTORY_STORAGE_KEY_PREFIX = 'chatHistory_'; // Prefix for session-specific history
 const LAST_ACTIVE_SESSION_KEY = 'lastActiveSessionId';
 

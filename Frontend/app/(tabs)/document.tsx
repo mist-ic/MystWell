@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { checkShouldShowDocumentModal } from '@/context/DocumentModalContext';
 
 // Define API Base URL (TODO: Move to central config/env)
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me';
+const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
 
 // --- Constants based on Spec ---
 const PAGE_PADDING_HORIZONTAL = 24;

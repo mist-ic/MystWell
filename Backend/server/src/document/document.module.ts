@@ -19,8 +19,23 @@ import { ProfileModule } from '../profile/profile.module'; // Import ProfileModu
     ConfigModule, // Import ConfigModule to access ConfigService
     SupabaseModule, // Import SupabaseModule explicitly to ensure providers are available
     ProfileModule, // Import ProfileModule to access ProfileService
-    BullModule.registerQueue({
+    BullModule.registerQueueAsync({
       name: DOCUMENT_PROCESSING_QUEUE,
+      imports: [ConfigModule], // Need ConfigModule to inject ConfigService
+      useFactory: async (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('REDIS_HOST', 'localhost'),
+          port: configService.get<number>('REDIS_PORT', 6379),
+          // Add keepAlive options
+          showFriendlyErrorStack: true,
+          keepAlive: 60000, // 60 seconds
+          noDelay: true,
+          // Add password/TLS if needed for Azure Cache for Redis
+          // password: configService.get<string>('REDIS_PASSWORD'),
+          // tls: { servername: configService.get<string>('REDIS_HOST') }
+        },
+      }),
+      inject: [ConfigService],
     }),
   ],
   controllers: [DocumentController],

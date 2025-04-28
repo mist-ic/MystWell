@@ -28,7 +28,7 @@ export interface Recording {
 }
 
 // API base URL
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://mystwell.me'; // Using production URL as default
+const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
 
 /**
  * Fetches a specific recording by its ID from the backend.

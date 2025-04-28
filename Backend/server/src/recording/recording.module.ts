@@ -23,6 +23,9 @@ import { SupabaseModule } from '../supabase/supabase.module'; // Import Supabase
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          showFriendlyErrorStack: true,
+          keepAlive: 60000,
+          noDelay: true,
         },
       }),
       inject: [ConfigService],
