@@ -57,11 +57,13 @@
     "react-native-svg": "15.8.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.19.13",
-    "react-native-webview": "^13.12.5"
+    "react-native-webview": "^13.12.5",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "@babel/core": "^7.26.10",
     "@types/jest": "^29.5.14",
+    "@types/lodash.debounce": "^4.0.9",
     "@types/react": "~18.3.12",
     "@types/react-test-renderer": "^18.3.1",
     "babel-plugin-module-resolver": "^5.0.2",

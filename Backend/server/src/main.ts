@@ -1,9 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
   
   app.useGlobalPipes(
@@ -25,7 +26,6 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
-  console.log('Swagger UI available at /api-docs');
   
   // Configure CORS for production and development environments
   const allowedOrigins = [
@@ -37,8 +37,6 @@ async function bootstrap() {
     'capacitor://*'          // Capacitor (if used)
   ];
   
-  console.log(`Configuring CORS for origins: ${allowedOrigins.join(', ')}`);
-  
   app.enableCors({
     origin: allowedOrigins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -49,7 +47,6 @@ async function bootstrap() {
   const host = '0.0.0.0';
   
   await app.listen(port, host);
-  console.log(`Application is running on: http://localhost:${port} and potentially other interfaces`);
-  console.log(`Accepting requests from allowed origins`);
+  logger.log(`Application running on port ${port}`);
 }
 bootstrap();

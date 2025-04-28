@@ -2,10 +2,15 @@ import { Module } from '@nestjs/common';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { ConfigModule } from '@nestjs/config';
+import { SupabaseModule } from '../supabase/supabase.module';
+import { ChatGateway } from './chat.gateway';
 
 @Module({
-  imports: [ConfigModule], // Import ConfigModule to access environment variables
+  imports: [
+    ConfigModule,
+    SupabaseModule,
+  ],
   controllers: [ChatController],
-  providers: [ChatService],
+  providers: [ChatService, ChatGateway],
 })
 export class ChatModule {} 

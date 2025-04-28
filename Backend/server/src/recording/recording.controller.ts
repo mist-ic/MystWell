@@ -137,15 +137,4 @@ export class RecordingController {
       const userId = this.getUserIdFromRequest(req);
       return this.recordingService.retryTranscription(userId, id);
   }
-
-  /**
-   * DEBUG ENDPOINT: Check if any recordings exist in the database
-   * This is temporary and should be removed after debugging
-   * TODO: Remove this endpoint before deploying to production
-   */
-  @Get('debug/check-recordings')
-  async debugCheckRecordings(): Promise<{ message: string }> {
-    await this.recordingService.debugCheckRecordings();
-    return { message: 'Debug check executed. See server logs for results.' };
-  }
 } 

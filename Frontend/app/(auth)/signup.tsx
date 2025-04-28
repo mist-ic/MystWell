@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, ScrollView } from 'react-native';
-import { TextInput, Button, Text, useTheme, HelperText } from 'react-native-paper';
+import { TextInput, Button, Text, useTheme, HelperText, Switch, MD3Theme } from 'react-native-paper';
 import { Link } from 'expo-router';
 import { useAuth } from '../../context/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,10 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [age, setAge] = useState('');
+  const [isMinor, setIsMinor] = useState(false);
+  const [guardianEmail, setGuardianEmail] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -23,6 +27,8 @@ export default function SignupScreen() {
 
   const isPasswordValid = () => PASSWORD_REGEX.test(password);
   const doPasswordsMatch = () => password === confirmPassword;
+  const isAgeValid = () => age === '' || (!isNaN(Number(age)) && Number(age) >= 0 && Number.isInteger(Number(age)));
+  const isGuardianEmailValid = () => !isMinor || (isMinor && guardianEmail.includes('@'));
 
   const handleSignup = async () => {
     if (!isPasswordValid()) {
@@ -33,10 +39,32 @@ export default function SignupScreen() {
       setError('Passwords do not match.');
       return;
     }
+    if (!fullName.trim()) {
+      setError('Full name is required.');
+      return;
+    }
+    if (!isAgeValid()) {
+      setError('Please enter a valid age (must be a whole number).');
+      return;
+    }
+    if (isMinor && !isGuardianEmailValid()) {
+      setError('A valid guardian email is required for minors.');
+      return;
+    }
+
+    const numericAge = age === '' ? null : parseInt(age, 10);
+
     try {
       setError('');
       setLoading(true);
-      await signUp(email, password);
+      await signUp(
+        email, 
+        password, 
+        fullName.trim(), 
+        numericAge, 
+        isMinor, 
+        guardianEmail.trim()
+      );
     } catch (err: any) {
       setError(err.message || 'An error occurred during signup');
     } finally {
@@ -60,6 +88,59 @@ export default function SignupScreen() {
               {error}
             </Text>
           ) : null}
+
+          <TextInput
+            label="Full Name"
+            value={fullName}
+            onChangeText={setFullName}
+            mode="outlined"
+            autoCapitalize="words"
+            style={styles.input}
+            outlineStyle={styles.inputOutline}
+            left={<TextInput.Icon icon="account-outline" />}
+          />
+
+          <TextInput
+            label="Age"
+            value={age}
+            onChangeText={setAge}
+            mode="outlined"
+            keyboardType="numeric"
+            style={styles.input}
+            outlineStyle={styles.inputOutline}
+            left={<TextInput.Icon icon="calendar-account-outline" />}
+          />
+          <HelperText type={isAgeValid() ? 'info' : 'error'} visible={age !== ''}>
+            {isAgeValid() ? '' : 'Age must be a whole number'}
+          </HelperText>
+
+          <View style={styles.switchContainer}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>Are you a minor?</Text>
+            <Switch 
+              value={isMinor} 
+              onValueChange={setIsMinor} 
+              color={theme.colors.primary}
+            />
+          </View>
+
+          {isMinor && (
+            <>
+              <TextInput
+                label="Guardian Email"
+                value={guardianEmail}
+                onChangeText={setGuardianEmail}
+                mode="outlined"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+                outlineStyle={styles.inputOutline}
+                left={<TextInput.Icon icon="email-outline" />}
+              />
+              <HelperText type={isGuardianEmailValid() ? 'info' : 'error'} visible={!!guardianEmail}>
+                {isGuardianEmailValid() ? '' : 'Please enter a valid email'}
+              </HelperText>
+            </>
+          )}
 
           <TextInput
             label="Email"
@@ -118,7 +199,17 @@ export default function SignupScreen() {
             mode="contained"
             onPress={handleSignup}
             loading={loading}
-            disabled={loading || !email || !password || !confirmPassword || !isPasswordValid() || !doPasswordsMatch()}
+            disabled={
+              loading || 
+              !email || 
+              !password || 
+              !confirmPassword || 
+              !isPasswordValid() || 
+              !doPasswordsMatch() ||
+              !fullName ||
+              !isAgeValid() ||
+              (isMinor && !isGuardianEmailValid())
+            }
             style={styles.button}
             labelStyle={styles.buttonLabel}
             contentStyle={styles.buttonContent}
@@ -141,7 +232,7 @@ export default function SignupScreen() {
 }
 
 // Define the styles factory function outside the component
-const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
+const createStyles = (theme: MD3Theme) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -170,6 +261,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>) => StyleSheet.create({
   helperText: {
     marginBottom: 12, 
     paddingHorizontal: 0, 
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    marginTop: 10,
+    paddingHorizontal: 8,
   },
   button: {
     marginTop: 24, 

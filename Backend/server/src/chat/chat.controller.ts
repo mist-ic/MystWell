@@ -1,47 +1,48 @@
 import {
   Controller,
-  Post,
-  Body,
-  UsePipes,
-  ValidationPipe,
-  UseGuards,
-  Req,
+  // Post, // Removed
+  // Body, // Removed
+  // UsePipes, // Removed
+  // ValidationPipe, // Removed
+  // UseGuards, // Removed
+  // Req, // Removed
   Logger,
-  HttpException,
-  HttpStatus,
+  // HttpException, // Removed
+  // HttpStatus, // Removed
 } from '@nestjs/common';
-import { ChatService } from './chat.service';
-import { SendMessageDto } from './dto/send-message.dto';
-import { AuthGuard } from '../auth/auth.guard'; // Assuming AuthGuard is in ../auth
-import { Request } from 'express'; // Import Request type
-import { User } from '@supabase/supabase-js'; // Import Supabase User type
+// import { ChatService } from './chat.service'; // Service is used by Gateway now
+// import { SendMessageDto } from './dto/send-message.dto'; // DTO not needed
+// import { AuthGuard } from '../auth/auth.guard'; // Guard applied at Gateway level
+// import { Request } from 'express'; // Request type not needed
+// import { User } from '@supabase/supabase-js'; // User type not needed here
 
-// Use the augmented Request type from AuthGuard (if globally declared)
-// Or define it locally if not global
-interface AuthenticatedRequest extends Request {
-  user?: User; // Use the actual Supabase User type
-}
+// Interface not needed
+// interface AuthenticatedRequest extends Request {
+//   user?: User;
+// }
 
 @Controller('chat')
 export class ChatController {
   private readonly logger = new Logger(ChatController.name);
 
-  constructor(private readonly chatService: ChatService) {}
+  // Remove constructor injection if ChatService isn't needed here anymore
+  // constructor(private readonly chatService: ChatService) {}
+  constructor() {
+      this.logger.log('ChatController initialized (HTTP endpoint removed, use WebSocket Gateway).');
+  }
 
-  @UseGuards(AuthGuard) // Protect this endpoint
+  // Remove the sendMessage method entirely
+  /*
+  @UseGuards(AuthGuard) 
   @Post('send')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async sendMessage(
-    @Req() req: AuthenticatedRequest, // Use the authenticated request type
+    @Req() req: AuthenticatedRequest, 
     @Body() sendMessageDto: SendMessageDto,
   ): Promise<{ reply: string }> {
-    
-    // Use the authenticated user's ID as the session identifier
-    // This ensures chat history is tied to the logged-in user
     const userId = req.user?.id;
     if (!userId) {
       this.logger.error('User ID not found in authenticated request.');
-      // This shouldn't happen if AuthGuard is working correctly
       throw new HttpException('Authentication error', HttpStatus.UNAUTHORIZED);
     }
 
@@ -49,7 +50,7 @@ export class ChatController {
 
     try {
       const reply = await this.chatService.sendMessage(
-        userId, // Use userId as sessionId
+        userId, 
         sendMessageDto.message,
       );
       return { reply };
@@ -58,11 +59,11 @@ export class ChatController {
         `Error handling chat message for user ${userId}:`,
         error.message || error,
       );
-      // Return a generic error response to the client
       throw new HttpException(
         'Failed to get chat response',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
+  */
 } 
