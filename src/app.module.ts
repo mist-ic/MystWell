@@ -24,8 +24,12 @@ import { ChatModule } from './chat/chat.module';
       useFactory: async (configService: ConfigService) => ({
         connection: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: configService.get<number>('REDIS_PORT', 6379),
-          // password: configService.get<string>('REDIS_PASSWORD'), // Uncomment if needed
+          port: configService.get<number>('REDIS_PORT', 6380),
+          password: configService.get<string>('REDIS_PASSWORD'),
+          tls: {}, // Enable TLS for Azure Redis
+          showFriendlyErrorStack: true,
+          keepAlive: 60000,
+          noDelay: true,
         },
       }),
       inject: [ConfigService],

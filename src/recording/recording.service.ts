@@ -355,19 +355,34 @@ export class RecordingService {
       updateData.duration = duration;
     }
     
-    // Execute update
-    const { data, error } = await this.supabaseServiceRole
-      .from('recordings')
-      .update(updateData)
-      .eq('id', recordingId)
-      .select()
-      .single();
-    
-    if (error) {
-      throw new InternalServerErrorException(`Failed to update recording status`);
+    try {
+      // Execute update
+      const { data, error } = await this.supabaseServiceRole
+        .from('recordings')
+        .update(updateData)
+        .eq('id', recordingId)
+        .select()
+        .single();
+      
+      if (error) {
+        this.logger.error(`Failed to update recording ${recordingId} status to ${status}: ${error.message}`, error);
+        throw new InternalServerErrorException(`Failed to update recording status: ${error.message}`);
+      }
+      
+      if (!data) {
+        this.logger.error(`No data returned when updating recording ${recordingId} status to ${status}`);
+        throw new NotFoundException(`Recording with ID ${recordingId} not found during status update`);
+      }
+      
+      return data as Recording;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException || 
+          error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Unexpected error updating recording ${recordingId} status: ${error.message}`, error);
+      throw new InternalServerErrorException(`An unexpected error occurred while updating recording status`);
     }
-    
-    return data as Recording;
   }
 
   /**

@@ -10,7 +10,7 @@ import { RecordingService } from './recording.service';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Buffer } from 'buffer';
-import { AxiosResponse } from 'axios';
+import { AxiosError, AxiosResponse } from 'axios';
 // import { PrismaService } from '../prisma/prisma.service'; // Assuming Prisma or similar for DB interaction
 
 // Define the structure of the job data we expect
@@ -39,6 +39,7 @@ export class RecordingProcessor extends WorkerHost {
 
   async process(job: Job<RecordingJobData>): Promise<void> {
     const { recordingId, profileId, storagePath, userId } = job.data;
+    this.logger.log(`Processing recording ${recordingId} for profile ${profileId} - attempt ${job.attemptsMade + 1}`);
 
     try {
       // Set initial processing status
@@ -48,16 +49,20 @@ export class RecordingProcessor extends WorkerHost {
       const { data: signedUrlData, error: urlError } = await this.supabaseAdmin
         .storage
         .from(this.BUCKET_NAME)
-        .createSignedUrl(storagePath, 60 * 5); // Signed URL valid for 5 minutes
+        .createSignedUrl(storagePath, 60 * 10); // Signed URL valid for 10 minutes (increased from 5)
 
       if (urlError || !signedUrlData?.signedUrl) {
+        const errorMsg = urlError ? urlError.message : 'Failed to create signed URL';
+        this.logger.error(`Failed to get signed URL for recording ${recordingId}: ${errorMsg}`);
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
           'failed', 
-          urlError ? urlError.message : 'Failed to create signed URL'
+          errorMsg
         );
-        throw new Error('Failed to get signed URL');
+        
+        // Return without throwing to mark as complete but failed
+        return;
       }
 
       // 2. Download the audio file using the signed URL
@@ -66,110 +71,189 @@ export class RecordingProcessor extends WorkerHost {
         const response: AxiosResponse<ArrayBuffer> = await firstValueFrom(
           this.httpService.get<ArrayBuffer>(signedUrlData.signedUrl, { 
             responseType: 'arraybuffer',
-            timeout: 30000, // 30 second timeout
-            maxContentLength: 100 * 1024 * 1024, // 100MB max size
+            timeout: 60000, // 60 second timeout (increased from 30)
+            maxContentLength: 150 * 1024 * 1024, // 150MB max size (increased from 100MB)
           }),
         );
         audioBytes = Buffer.from(response.data);
+        this.logger.log(`Successfully downloaded ${audioBytes.length} bytes for recording ${recordingId}`);
       } catch (downloadError) {
+        // More specific error handling for download failures
+        let errorMessage = 'Failed to download audio file';
+        
+        if (downloadError instanceof AxiosError) {
+          if (downloadError.code === 'ECONNABORTED') {
+            errorMessage = 'Download timeout - the server took too long to respond';
+          } else if (downloadError.response) {
+            errorMessage = `Download failed with status ${downloadError.response.status}: ${downloadError.message}`;
+          }
+        }
+        
+        this.logger.error(`Failed to download recording ${recordingId}: ${errorMessage}`, downloadError);
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
           'download_failed', 
-          'Failed to download audio file'
+          errorMessage
         );
-        throw downloadError;
+        
+        // For network errors, throw to allow retries
+        if (downloadError instanceof AxiosError && 
+            (downloadError.code === 'ECONNRESET' || 
+             downloadError.code === 'ETIMEDOUT' || 
+             downloadError.code === 'ECONNABORTED')) {
+          throw downloadError;
+        }
+        
+        // Otherwise return without throwing to mark as complete but failed
+        return;
       }
 
       // 3. Transcribe the audio
-      const rawTranscript = await this.speechToTextService.transcribeAudio(
-          audioBytes,
-          profileId
-      );
+      try {
+        const rawTranscript = await this.speechToTextService.transcribeAudio(
+            audioBytes,
+            profileId
+        );
 
-      if (!rawTranscript) {
+        if (!rawTranscript) {
+          this.logger.error(`Transcription failed or returned empty for recording ${recordingId}`);
+          await this.recordingService.updateRecordingStatus(
+            userId, 
+            recordingId, 
+            'transcription_failed', 
+            'Transcription failed or returned empty'
+          );
+          return;
+        }
+
+        // Update status and save transcript
+        await this.recordingService.updateRecordingStatus(
+          userId,
+          recordingId,
+          'transcribing_completed'
+        );
+        
+        this.logger.log(`Transcription completed for recording ${recordingId}`);
+        
+        // Also update the raw_transcript field directly
+        const { error: transcriptUpdateError } = await this.supabaseAdmin
+          .from('recordings')
+          .update({
+            raw_transcript: rawTranscript,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', recordingId);
+          
+        if (transcriptUpdateError) {
+          this.logger.error(`Failed to save transcript for recording ${recordingId}: ${transcriptUpdateError.message}`);
+          // Continue processing but log the error
+        }
+
+        // 4. Analyze with Gemini
+        const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(
+            rawTranscript,
+            profileId
+        );
+
+        if (!structuredDetails) {
+          this.logger.error(`Analysis failed or returned empty for recording ${recordingId}`);
+          await this.recordingService.updateRecordingStatus(
+            userId, 
+            recordingId, 
+            'analysis_failed', 
+            'Analysis failed or returned empty'
+          );
+          return;
+        }
+
+        // Update status and save structured details
+        const { error: finalUpdateError } = await this.supabaseAdmin
+          .from('recordings')
+          .update({
+            structured_details: structuredDetails,
+            status: 'completed',
+            error: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', recordingId);
+          
+        if (finalUpdateError) {
+          this.logger.error(`Failed to save final analysis for recording ${recordingId}: ${finalUpdateError.message}`);
+          await this.recordingService.updateRecordingStatus(
+            userId, 
+            recordingId, 
+            'save_failed', 
+            'Failed to save analysis results'
+          );
+          return;
+        }
+        
+        this.logger.log(`Successfully completed processing recording ${recordingId}`);
+      } catch (processingError) {
+        // Handle transcription and analysis errors
+        this.logger.error(`Processing error for recording ${recordingId}: ${processingError.message}`, processingError);
+        
+        const errorPhase = processingError.message.includes('transcribe') 
+          ? 'transcription_failed' 
+          : 'analysis_failed';
+          
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
-          'transcription_failed', 
-          'Transcription failed or empty'
+          errorPhase, 
+          processingError.message || 'Processing error'
         );
+        
+        // For Google API quota errors, we might want to delay and retry
+        if (processingError.message.includes('quota') || 
+            processingError.message.includes('rate limit')) {
+          throw processingError; // Allow retry with backoff
+        }
+        
         return;
       }
-
-      // Update status and save transcript
-      await this.recordingService.updateRecordingStatus(
-        userId,
-        recordingId,
-        'transcribing_completed',
-        undefined,
-      );
-      
-      // Also update the raw_transcript field directly
-      await this.supabaseAdmin
-        .from('recordings')
-        .update({
-          raw_transcript: rawTranscript,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', recordingId);
-
-      // 4. Analyze with Gemini
-      const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(
-          rawTranscript,
-          profileId
-      );
-
-      if (!structuredDetails) {
-        await this.recordingService.updateRecordingStatus(
-          userId, 
-          recordingId, 
-          'analysis_failed', 
-          'Analysis failed or empty'
-        );
-        return;
-      }
-
-      // Update status and save structured details
-      await this.supabaseAdmin
-        .from('recordings')
-        .update({
-          structured_details: structuredDetails,
-          status: 'completed',
-          error: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', recordingId);
 
     } catch (error) {
-      this.logger.error(`Error processing recording ${recordingId}: ${error.message}`);
+      this.logger.error(`Error processing recording ${recordingId}: ${error.message}`, error);
       
-      const finalErrorStatus = error.message.includes('download') 
-        ? 'download_failed' 
-        : 'processing_failed';
-        
       try {
+        const finalErrorStatus = error.message.includes('download') 
+          ? 'download_failed' 
+          : error.message.includes('quota') || error.message.includes('rate limit')
+            ? 'quota_exceeded'
+            : 'processing_failed';
+            
+        const errorMsg = finalErrorStatus === 'quota_exceeded'
+          ? 'API rate limit exceeded. Will retry automatically.'
+          : (error.message || 'Unknown processing error');
+          
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
           finalErrorStatus, 
-          error.message || 'Unknown processing error'
+          errorMsg
         );
       } catch (dbError) {
         this.logger.error(`Failed to update recording status after error: ${dbError.message}`);
       }
       
+      // Mark the job as failed
       throw error;
     }
   }
 
   // Optional: Listen for events like completion or failure
-  onCompleted(job: Job, result: any) {
-    // this.logger.log(`Job ${job.id} completed successfully.`);
+  onCompleted(job: Job<RecordingJobData>) {
+    const { recordingId } = job.data;
+    this.logger.log(`Job for recording ${recordingId} completed successfully after ${job.attemptsMade + 1} attempts.`);
   }
 
-  onFailed(job: Job, error: Error) {
-    this.logger.error(`Job ${job.id} failed with error: ${error.message}`, error.stack);
-    // You might add more sophisticated error reporting here
+  onFailed(job: Job<RecordingJobData>, error: Error) {
+    const { recordingId } = job.data;
+    this.logger.error(
+      `Job for recording ${recordingId} failed after ${job.attemptsMade + 1} attempts with error: ${error.message}`, 
+      error.stack
+    );
   }
 } 

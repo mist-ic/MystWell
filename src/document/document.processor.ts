@@ -7,6 +7,13 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Schema, SchemaType } from '@google/generative-ai';
 
+interface DocumentJobData {
+  storagePath: string; 
+  documentId: string; 
+  profileId: string; 
+  displayName: string;
+}
+
 @Injectable() // Add Injectable decorator
 @Processor(DOCUMENT_PROCESSING_QUEUE)
 export class DocumentProcessor extends WorkerHost implements OnModuleInit {
@@ -31,9 +38,9 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
     this.logger.log(`Processor for queue ${DOCUMENT_PROCESSING_QUEUE} initialized.`);
   }
 
-  async process(job: Job<{ storagePath: string; documentId: string; profileId: string; displayName: string }>): Promise<any> {
-    const { storagePath, documentId, profileId, displayName } = job.data; // Extract displayName
-    this.logger.log(`Starting job ${job.id} for document ${documentId} (path: ${storagePath}, profile: ${profileId}, displayName: ${displayName})`);
+  async process(job: Job<DocumentJobData>): Promise<any> {
+    const { storagePath, documentId, profileId, displayName } = job.data;
+    this.logger.log(`Starting job ${job.id} for document ${documentId} (path: ${storagePath}, profile: ${profileId}, attempt: ${job.attemptsMade + 1})`);
 
     try {
       // 1. Update status to processing (use supabaseAdmin)
@@ -48,9 +55,13 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           .download(storagePath);
 
       if (downloadError || !blob) {
-          throw new Error(`Failed to download image: ${downloadError?.message || 'Unknown error'}`);
+          const errorMsg = downloadError?.message || 'Unknown error';
+          this.logger.error(`Failed to download image: ${errorMsg}`);
+          await this.updateDocumentStatus(documentId, 'download_failed', undefined, undefined, null, `Failed to download: ${errorMsg}`);
+          // Return instead of throwing for storage errors to prevent unnecessary retries
+          return { success: false, error: 'download_failed' };
       }
-      this.logger.log(`Image downloaded successfully.`);
+      this.logger.log(`Image downloaded successfully (size: ${blob.size} bytes).`);
 
       // 3. Convert to base64
       const imageBuffer = Buffer.from(await blob.arrayBuffer());
@@ -69,7 +80,9 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       ];
       if (!supportedMimeTypes.includes(mimeType)){
           this.logger.warn(`Unsupported mime type ${mimeType} for document ${documentId}. Skipping Gemini.`);
-          throw new Error(`Unsupported file type: ${mimeType}`); // Changed error message slightly
+          await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, `Unsupported file type: ${mimeType}`);
+          // Return instead of throwing for unsupported mime types (no point in retrying)
+          return { success: false, error: 'unsupported_mime_type' };
       }
 
       // 4. Define Schema (more strictly typed)
@@ -132,64 +145,90 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       // 5. Call Gemini API
       this.logger.log(`Calling Gemini API (model: gemini-1.5-flash-latest) for document ${documentId}...`);
       
-      const model = this.googleAiClient.getGenerativeModel({
-          model: "gemini-1.5-flash-latest",
-          safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-            ],
-          generationConfig: { responseMimeType: "application/json" },
-      });
-
-      const prompt = `Analyze the attached medical document (image or PDF) and extract the key information. \nRespond ONLY with a valid JSON object adhering to the following structure. Do NOT include any other text or formatting like backticks (\`\`\").\n\nJSON Structure:\n${JSON.stringify(schema, null, 2)}\n\nDocument Analysis:`;
-      const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
-      
-      const parts = [ { text: prompt }, filePart ];
-
       let extractedJson: any;
       try {
-          const result = await model.generateContent({ contents: [{ role: "user", parts }] });
-          const response = result.response;
-          const responseText = response?.text();
+        const model = this.googleAiClient.getGenerativeModel({
+            model: "gemini-1.5-flash-latest",
+            safetySettings: [
+                  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+                  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+              ],
+            generationConfig: { responseMimeType: "application/json" },
+        });
 
-          if (!responseText) {
-            this.logger.error(`Gemini returned an empty response for document ${documentId}.`);
-            throw new Error('Gemini returned an empty response.');
-          }
+        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information. \nRespond ONLY with a valid JSON object adhering to the following structure. Do NOT include any other text or formatting like backticks (\`\`\").\n\nJSON Structure:\n${JSON.stringify(schema, null, 2)}\n\nDocument Analysis:`;
+        const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
+        
+        const parts = [ { text: prompt }, filePart ];
 
-          this.logger.log(`Received raw response text from Gemini: ${responseText}`);
+        const result = await model.generateContent({ contents: [{ role: "user", parts }] });
+        const response = result.response;
+        const responseText = response?.text();
 
+        if (!responseText) {
+          this.logger.error(`Gemini returned an empty response for document ${documentId}.`);
+          await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Gemini returned an empty response');
+          // Throw to enable retry for empty responses (could be temporary)
+          throw new Error('Gemini returned an empty response.');
+        }
+
+        this.logger.debug(`Received raw response text from Gemini for document ${documentId}`);
+
+        try {
+          extractedJson = JSON.parse(responseText);
+          this.logger.log('Successfully parsed Gemini response text as JSON.');
+        } catch (parseError) {
+          this.logger.error(`Failed to parse Gemini response text as JSON for document ${documentId}`, parseError.stack);
+          const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
           try {
-            extractedJson = JSON.parse(responseText);
-            this.logger.log('Successfully parsed Gemini response text as JSON.');
-          } catch (parseError) {
-            this.logger.error(`Failed to parse Gemini response text as JSON for document ${documentId}. Text: ${responseText}`, parseError.stack);
-            const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
-            try {
-              extractedJson = JSON.parse(cleanedText);
-              this.logger.log('Successfully parsed cleaned Gemini response text as JSON.');
-            } catch (cleanedParseError) {
-              this.logger.error(`Failed to parse even cleaned Gemini response text as JSON for document ${documentId}. Cleaned Text: ${cleanedText}`, cleanedParseError.stack);
-              throw new Error('Gemini response was not valid JSON, even after cleaning.');
-            }
+            extractedJson = JSON.parse(cleanedText);
+            this.logger.log('Successfully parsed cleaned Gemini response text as JSON.');
+          } catch (cleanedParseError) {
+            this.logger.error(`Failed to parse even cleaned Gemini response text as JSON for document ${documentId}`, cleanedParseError.stack);
+            await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Failed to parse Gemini response as JSON');
+            // No point in retrying parse errors as they are deterministic
+            return { success: false, error: 'json_parse_error' };
           }
-
+        }
       } catch (apiError) {
-          this.logger.error(`Gemini API call failed for document ${documentId}: ${apiError.message}`, apiError.stack);
-          if (apiError.response && apiError.response.promptFeedback) {
-              this.logger.error(`Prompt Feedback: ${JSON.stringify(apiError.response.promptFeedback)}`);
-              throw new Error(`Gemini API error: Blocked due to ${apiError.response.promptFeedback.blockReason}`);
-          }
-          throw new Error(`Gemini API error: ${apiError.message}`);
+        this.logger.error(`Gemini API call failed for document ${documentId}: ${apiError.message}`, apiError.stack);
+        
+        let errorMsg = `Gemini API error: ${apiError.message}`;
+        let errorStatus = 'processing_failed';
+        
+        if (apiError.response && apiError.response.promptFeedback) {
+            this.logger.error(`Prompt Feedback: ${JSON.stringify(apiError.response.promptFeedback)}`);
+            errorMsg = `Gemini API error: Blocked due to ${apiError.response.promptFeedback.blockReason}`;
+            // Don't retry safety blocks
+            return { success: false, error: 'safety_block' };
+        }
+        
+        // Check for rate limiting or quota errors to enable retries
+        if (apiError.message.includes('quota') || 
+            apiError.message.includes('rate limit') || 
+            apiError.message.includes('429') ||
+            apiError.message.includes('too many requests')) {
+          errorStatus = 'quota_exceeded';
+          errorMsg = 'Gemini API quota exceeded or rate limited. Will retry automatically.';
+          await this.updateDocumentStatus(documentId, errorStatus, undefined, undefined, null, errorMsg);
+          // Throw for quota errors to enable retries with backoff
+          throw apiError;
+        }
+        
+        await this.updateDocumentStatus(documentId, errorStatus, undefined, undefined, null, errorMsg);
+        // For other API errors, throw to enable retries
+        throw apiError;
       }
 
       this.logger.log(`Gemini call successful for document ${documentId}.`);
 
       if (!extractedJson || typeof extractedJson !== 'object' || !extractedJson.detected_document_type) {
         this.logger.error(`Invalid or incomplete JSON structure received from Gemini for ${documentId}: ${JSON.stringify(extractedJson)}`);
-        throw new Error('Invalid or incomplete JSON structure received from Gemini');
+        await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Invalid or incomplete JSON structure received from Gemini');
+        // Don't retry for invalid responses
+        return { success: false, error: 'invalid_response' };
       }
 
       // 6. ---> Generate Embedding <--- 
@@ -197,23 +236,22 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       const textToEmbed = extractedJson.headerDescription;
 
       if (textToEmbed && typeof textToEmbed === 'string' && textToEmbed.trim().length > 0) {
-          try {
-              this.logger.log(`Generating embedding for document ${documentId} using headerDescription...`);
-              const embeddingModel = this.googleAiClient.getGenerativeModel({ model: "text-embedding-004" });
-              const embeddingResult = await embeddingModel.embedContent(textToEmbed);
-              embeddingVector = embeddingResult?.embedding?.values ?? null;
-              if (embeddingVector) {
-                  this.logger.log(`Successfully generated embedding for document ${documentId} (dimensions: ${embeddingVector.length})`);
-              } else {
-                   this.logger.warn(`Embedding generation returned no values for document ${documentId}.`);
-              }
-          } catch (embeddingError) {
-               this.logger.error(`Failed to generate embedding for document ${documentId}: ${embeddingError.message}`, embeddingError.stack);
-               // Decide if this should be a fatal error for the job? 
-               // For now, log the error and continue without embedding.
+        try {
+          this.logger.log(`Generating embedding for document ${documentId} using headerDescription...`);
+          const embeddingModel = this.googleAiClient.getGenerativeModel({ model: "text-embedding-004" });
+          const embeddingResult = await embeddingModel.embedContent(textToEmbed);
+          embeddingVector = embeddingResult?.embedding?.values ?? null;
+          if (embeddingVector) {
+            this.logger.log(`Successfully generated embedding for document ${documentId} (dimensions: ${embeddingVector.length})`);
+          } else {
+            this.logger.warn(`Embedding generation returned no values for document ${documentId}.`);
           }
+        } catch (embeddingError) {
+          this.logger.error(`Failed to generate embedding for document ${documentId}: ${embeddingError.message}`, embeddingError.stack);
+          // Continue without embedding - this is not a fatal error
+        }
       } else {
-           this.logger.warn(`No valid headerDescription found in extracted JSON for document ${documentId}. Skipping embedding.`);
+        this.logger.warn(`No valid headerDescription found in extracted JSON for document ${documentId}. Skipping embedding.`);
       }
       // ---> End Embedding Generation <--- 
 
@@ -224,9 +262,44 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
 
     } catch (error) {
       this.logger.error(`Job ${job.id} failed for document ${documentId}: ${error.message}`, error.stack);
-      await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, error.message);
+      
+      // Determine if we should retry based on the error
+      const isRetryableError = 
+        error.message.includes('quota') || 
+        error.message.includes('rate limit') ||
+        error.message.includes('network') ||
+        error.message.includes('timeout') ||
+        error.message.includes('connection');
+        
+      const errorStatus = isRetryableError ? 'retry_pending' : 'processing_failed';
+      
+      await this.updateDocumentStatus(
+        documentId, 
+        errorStatus, 
+        undefined, 
+        undefined, 
+        null, 
+        isRetryableError ? `Error: ${error.message}. Will retry automatically.` : error.message
+      );
+      
+      // Always throw to let BullMQ handle retry logic based on queue configuration
       throw error;
     }
+  }
+
+  // Listen for completion events
+  onCompleted(job: Job<DocumentJobData>) {
+    const { documentId } = job.data;
+    this.logger.log(`Job for document ${documentId} completed successfully after ${job.attemptsMade + 1} attempts.`);
+  }
+
+  // Listen for failure events
+  onFailed(job: Job<DocumentJobData>, error: Error) {
+    const { documentId } = job.data;
+    this.logger.error(
+      `Job for document ${documentId} failed after ${job.attemptsMade + 1} attempts with error: ${error.message}`, 
+      error.stack
+    );
   }
 
   private async updateDocumentStatus(documentId: string, status: string, displayName?: string | undefined, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
@@ -234,7 +307,9 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           status,
           updated_at: new Date(),
           // Reset error message unless explicitly setting failed status
-          error_message: status === 'processing_failed' ? errorMessage?.substring(0, 500) : null 
+          error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
+              ? errorMessage?.substring(0, 500) 
+              : null 
       }; 
 
       if (status === 'processed') {
@@ -249,23 +324,21 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           if (displayName !== undefined) {
               updateData.display_name = displayName;
           }
-      } 
-      // No need for separate check for processing_failed error message, handled above
-      /* else if (status === 'processing_failed') { 
-          updateData.error_message = errorMessage?.substring(0, 500);
-      } */
+      }
 
-      const { error } = await this.supabaseAdmin
-          .from('documents')
-          .update(updateData)
-          .eq('id', documentId);
-
-      if (error) {
-          this.logger.error(`Failed to update status/data for document ${documentId} to ${status}: ${error.message}`);
-          // Don't throw here, as the main processing might have succeeded, 
-          // but log that the final update failed.
-      } else {
-          this.logger.log(`Successfully updated document ${documentId} status to ${status}` + (embedding ? ' with embedding.' : '.'));
+      try {
+          const { error } = await this.supabaseAdmin
+              .from('documents')
+              .update(updateData)
+              .eq('id', documentId);
+              
+          if (error) {
+              this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
+              // Don't throw here, as it would cause the job to fail and retry unnecessarily
+          }
+      } catch (updateError) {
+          this.logger.error(`Error updating document ${documentId} status: ${updateError.message}`, updateError.stack);
+          // Don't throw here either
       }
   }
 } 

@@ -32,6 +32,15 @@ import { ProfileModule } from '../profile/profile.module'; // Import ProfileModu
           keepAlive: 60000,
           noDelay: true,
         },
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: {
+            type: 'exponential',
+            delay: 15000, // 15 seconds initial delay
+          },
+          removeOnComplete: true,
+          removeOnFail: 1000, // Keep last 1000 failed jobs
+        },
       }),
       inject: [ConfigService],
     }),

@@ -31,6 +31,8 @@ async function bootstrap() {
   const allowedOrigins = [
     'https://mystwell.me',
     'https://www.mystwell.me',
+    'https://myst-well.systems',
+    'https://www.myst-well.systems',
     'http://localhost:8081',
     'http://localhost:19006', // Expo web development
     'exp://*',                // Expo development
