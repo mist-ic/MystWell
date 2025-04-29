@@ -57,7 +57,7 @@ jobs:
       - name: Zip artifact directory for deployment
         run: |
           cd artifact
-          zip -r ../../release.zip ./*
+          zip -r ../release.zip ./*
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
