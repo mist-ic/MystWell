@@ -23,29 +23,24 @@ jobs:
       # Step 1: Install ALL dependencies (needed for build tools like @nestjs/cli)
       - name: npm ci (all dependencies)
         run: npm ci
-        working-directory: Backend/server
 
       # Step 2: Build the application (uses dev dependencies)
       - name: npm run build
         run: npm run build
-        working-directory: Backend/server
 
       # Step 3: Remove development node_modules
       - name: Remove development node_modules
         run: rm -rf node_modules
-        working-directory: Backend/server
 
       # Step 4: Install ONLY production dependencies
       - name: npm ci (production only)
         run: npm ci --omit=dev
-        working-directory: Backend/server
 
       # Step 5: Prepare artifact directory
       - name: Create artifact directory structure
         run: |
           mkdir -p artifact/dist
           mkdir -p artifact/node_modules
-        working-directory: Backend/server
 
       # Step 6: Copy necessary files to artifact directory
       - name: Copy production files to artifact directory
@@ -57,14 +52,12 @@ jobs:
           # Add any other necessary runtime files here, e.g.:
           # cp .env.production artifact/
           # cp -r public artifact/  (if you have static assets)
-        working-directory: Backend/server
 
       # Step 7: Zip the prepared artifact directory
       - name: Zip artifact directory for deployment
         run: |
-          cd Backend/server/artifact
-          zip -r ../../../release.zip ./*
-        # Note: Adjust zip path if needed based on where upload-artifact expects it
+          cd artifact
+          zip -r ../../release.zip ./*
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -88,10 +81,6 @@ jobs:
         with:
           name: node-app
           # It will download release.zip to the root of the runner workspace
-
-      # Remove the unzip step - we deploy the zip directly
-      # - name: Unzip artifact for deployment
-      #   run: unzip release.zip
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -107,5 +96,3 @@ jobs:
           app-name: 'mystwell-api'
           slot-name: 'Production'
           package: release.zip # Deploy the zip file directly
-          # Optional: Consider deployment-method: 'run-from-package' for potentially even faster deployments
-          # deployment-method: 'run-from-package'
