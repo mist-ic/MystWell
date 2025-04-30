@@ -847,68 +847,42 @@ function RecordScreenContent() {
 
       // 2. Get upload URL from backend
       console.log('Requesting upload URL...');
-      const uploadUrlOptions = { 
-        method: 'POST', 
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json' // Important, even for empty body sometimes
-        },
-        body: JSON.stringify({}) // Send empty JSON object
-      };
-      console.log('DEBUG: Fetching upload URL with options:', uploadUrlOptions);
-      const uploadResponse = await fetch(`${API_BASE_URL}/recordings/upload-url`, uploadUrlOptions);
-      
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        throw new Error(`Failed to get upload URL: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
-      }
-
-      const uploadData = await uploadResponse.json();
-      activeUploadInfo.current = uploadData; // <-- Store the upload info
-      console.log("Upload URL received for recording ID:", uploadData.recordingId);
-
-      // 3. Configure Audio Mode (If needed, might be redundant after web getUserMedia)
-      // Consider if this is necessary for web platform
-      if (Platform.OS !== 'web') { 
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-      }
-
-      // 4. Create and start Expo recording instance
-      console.log('Starting Expo AV recording...');
-      // Ensure any previous recording instance is unloaded
-      if (recordingInstance) {
-          await recordingInstance.stopAndUnloadAsync();
-          // No need to set to null here, setRecordingInstance will overwrite
-      }
-      // Configure audio recording settings for Android and iOS
       const recordingOptions: Audio.RecordingOptions = {
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY, // Start with a preset and override
-        android: {
-          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.android,
-          extension: '.wav', // Use WAV format
-          outputFormat: Audio.AndroidOutputFormat.DEFAULT, // Let expo handle based on extension
-          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT, // Let expo handle based on extension
-          sampleRate: 16000, // Standard speech recognition rate
-          numberOfChannels: 1,
-        },
-        ios: {
-          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
-          extension: '.wav', // Use WAV on iOS too (LINEAR16)
-          sampleRate: 16000,
-          numberOfChannels: 1,
-        },
-        web: {
-          // Web might need different handling if you support it
-          // mimeType: 'audio/wav',
-          // bitsPerSecond: 128000,
-          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.web, // Keep web defaults or adjust as needed
-        }
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY_16000, // Start with a quality preset
+        ...(Platform.OS === 'android' && { // Apply Android specific overrides
+          android: {
+            extension: '.wav', // Use WAV container
+            outputFormat: Audio.AndroidOutputFormat.DEFAULT, // Let system choose based on encoder/extension
+            audioEncoder: Audio.AndroidAudioEncoder.DEFAULT, // Default encoder (should choose PCM for WAV)
+            sampleRate: 16000, // Common rate for speech recognition
+            numberOfChannels: 1, // Mono is typical for speech
+            // Bitrate for PCM = SampleRate * BitDepth * Channels
+            // Assuming 16-bit depth (implied by PCM_16BIT intent, common for WAV)
+            bitRate: 16000 * 16 * 1, 
+          },
+          web: {
+            // Keep web defaults or specify if needed, e.g., Opus
+            // mimeType: 'audio/webm;codecs=opus',
+            // bitsPerSecond: 128000, 
+          },
+        }),
+        ...(Platform.OS === 'ios' && { // iOS specific options
+          ios: {
+            extension: '.wav', // Also use WAV on iOS for consistency
+            outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+            audioQuality: Audio.IOSAudioQuality.MAX,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 16000 * 16 * 1, // PCM Bitrate
+            linearPCMBitDepth: 16,
+            linearPCMIsBigEndian: false,
+            linearPCMIsFloat: false,
+          },
+        }),
       };
+
       const { recording } = await Audio.Recording.createAsync(
-        recordingOptions,
+        recordingOptions, // Use the constructed options object
         (status) => {
           // Update audio level for visualization (optional)
           if (status.isRecording) {
@@ -977,7 +951,8 @@ function RecordScreenContent() {
       setUploadProgress(0);
       const uploadResponseS3 = await fetch(uploadUrl, { // <-- Use stored uploadUrl
         method: 'PUT',
-        headers: { 'Content-Type': blob.type || 'audio/m4a' },
+        // Use the correct content type based on the recording options
+        headers: { 'Content-Type': (Platform.OS === 'android' || Platform.OS === 'ios') ? 'audio/wav' : (blob.type || 'audio/m4a') },
         body: blob,
       });
 
