@@ -1,5 +1,5 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import { Server, ServerOptions } from 'socket.io';
+import { Server } from 'socket.io';
 import { INestApplicationContext } from '@nestjs/common';
 
 export class SocketIoAdapter extends IoAdapter {
@@ -7,7 +7,7 @@ export class SocketIoAdapter extends IoAdapter {
     super(app);
   }
 
-  createIOServer(port: number, options?: ServerOptions): Server {
+  createIOServer(port: number, options?: any): Server {
     const configService = this.app.get('ConfigService'); // Get ConfigService if needed for origins
     
     // Define allowed origins directly or fetch from ConfigService
@@ -27,7 +27,8 @@ export class SocketIoAdapter extends IoAdapter {
     // Ensure serveClient is explicitly defined, defaulting to true
     const serveClient = options?.serveClient === undefined ? true : options.serveClient;
 
-    const serverOptionsWithCors: ServerOptions = {
+    // Create options with CORS configuration
+    const corsOptions = {
       ...options,
       path: path, // Explicitly include path
       serveClient: serveClient, // Explicitly include serveClient
@@ -38,9 +39,7 @@ export class SocketIoAdapter extends IoAdapter {
       },
     };
 
-    console.log('Creating Socket.IO server with explicit CORS options:', serverOptionsWithCors.cors, 'and path:', serverOptionsWithCors.path, 'serveClient:', serverOptionsWithCors.serveClient);
-    // Call super.createIOServer and ensure the return type is Server
-    const server: Server = super.createIOServer(port, serverOptionsWithCors);
-    return server;
+    console.log('Creating Socket.IO server with CORS options:', JSON.stringify(corsOptions.cors));
+    return super.createIOServer(port, corsOptions);
   }
 } 
