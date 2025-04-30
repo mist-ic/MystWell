@@ -11,6 +11,8 @@ import { PrescriptionModule } from './prescription/prescription.module';
 import { ProfileModule } from './profile/profile.module';
 import { DocumentModule } from './document/document.module';
 import { ChatModule } from './chat/chat.module';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -18,6 +20,11 @@ import { ChatModule } from './chat/chat.module';
       isGlobal: true, // Make ConfigModule global
       envFilePath: '.env',
     }),
+    // Configure Throttler (Rate Limiting)
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // Time-to-live: 60 seconds (in milliseconds)
+      limit: 100, // Limit: 100 requests per ttl per IP
+    }]),
     // Configure BullMQ connection globally
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -44,6 +51,13 @@ import { ChatModule } from './chat/chat.module';
     ChatModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Apply ThrottlerGuard globally
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

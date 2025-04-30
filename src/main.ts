@@ -3,12 +3,18 @@ import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
+import * as compression from 'compression';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
   
+  app.use(helmet());
+
   app.useWebSocketAdapter(new SocketIoAdapter(app));
+
+  app.use(compression());
 
   app.useGlobalPipes(
     new ValidationPipe({
