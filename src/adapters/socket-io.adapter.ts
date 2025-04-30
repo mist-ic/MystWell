@@ -24,10 +24,13 @@ export class SocketIoAdapter extends IoAdapter {
 
     // Ensure path is explicitly defined, defaulting to standard socket.io path
     const path = options?.path || '/socket.io';
+    // Ensure serveClient is explicitly defined, defaulting to true
+    const serveClient = options?.serveClient === undefined ? true : options.serveClient;
 
     const serverOptionsWithCors: ServerOptions = {
       ...options,
       path: path, // Explicitly include path
+      serveClient: serveClient, // Explicitly include serveClient
       cors: {
         origin: allowedOrigins,
         methods: ['GET', 'POST'], // Standard methods for Socket.IO handshake
@@ -35,7 +38,7 @@ export class SocketIoAdapter extends IoAdapter {
       },
     };
 
-    console.log('Creating Socket.IO server with explicit CORS options:', serverOptionsWithCors.cors, 'and path:', serverOptionsWithCors.path);
+    console.log('Creating Socket.IO server with explicit CORS options:', serverOptionsWithCors.cors, 'and path:', serverOptionsWithCors.path, 'serveClient:', serverOptionsWithCors.serveClient);
     // Call super.createIOServer and ensure the return type is Server
     const server: Server = super.createIOServer(port, serverOptionsWithCors);
     return server;
