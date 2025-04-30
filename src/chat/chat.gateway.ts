@@ -42,9 +42,9 @@ interface GetHistoryPayload {
 type ChatSessionRow = Database['public']['Tables']['chat_sessions']['Row'];
 
 @WebSocketGateway({
-  cors: {
-    origin: '*', // TODO: Restrict in production
-  },
+  // cors: {
+  //   origin: '*', // TODO: Restrict in production
+  // },
   // Consider namespace: namespace: 'chat'
 })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {

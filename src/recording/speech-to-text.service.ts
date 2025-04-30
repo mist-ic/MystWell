@@ -15,20 +15,27 @@ export class SpeechToTextService {
   private speechClient: SpeechClient;
 
   constructor(private configService: ConfigService) {
-    // TODO: Securely fetch credentials - using file path for now
-    // Ensure the GOOGLE_APPLICATION_CREDENTIALS env var is set
-    // or provide credentials explicitly.
-    // Example using env var:
-    // If GOOGLE_APPLICATION_CREDENTIALS is set, client automatically uses it.
-    // If not set, you might load from ConfigService:
-    // const keyFilename = this.configService.get<string>('GOOGLE_APP_CREDS_PATH');
     try {
-      // Attempt to explicitly use V2 if the library supports versioning in constructor
-      this.speechClient = new SpeechClient({
-        // No explicit version option seems standard, rely on correct protos/methods
-        // Ensure GOOGLE_APPLICATION_CREDENTIALS is set correctly.
-      });
-      this.logger.log('SpeechClient initialized (ensure GOOGLE_APPLICATION_CREDENTIALS points to a key with V2 API enabled).');
+      const credentialsJson = this.configService.get<string>('GOOGLE_APPLICATION_CREDENTIALS_JSON');
+      let clientOptions = {};
+
+      if (credentialsJson) {
+        try {
+          const credentials = JSON.parse(credentialsJson);
+          clientOptions = { credentials };
+          this.logger.log('Initializing SpeechClient using credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON env var.');
+        } catch (parseError) {
+          this.logger.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON. Falling back to default credential discovery.', parseError);
+          // If parsing fails, clientOptions remains empty, relying on default discovery
+        }
+      } else {
+        this.logger.log('GOOGLE_APPLICATION_CREDENTIALS_JSON not found. Using default SpeechClient credential discovery (e.g., GOOGLE_APPLICATION_CREDENTIALS file path or instance metadata).');
+      }
+
+      // Initialize client with parsed credentials if available, otherwise empty options for default discovery
+      this.speechClient = new SpeechClient(clientOptions);
+      this.logger.log('SpeechClient initialized successfully.'); // Simplified success log
+
     } catch (error) {
       this.logger.error('Failed to initialize SpeechClient:', error);
       throw error;
