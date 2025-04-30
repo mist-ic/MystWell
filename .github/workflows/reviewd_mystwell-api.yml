@@ -50,14 +50,6 @@ jobs:
       - name: npm run build
         run: npm run build
 
-      # Step 3: Remove development node_modules
-      - name: Remove development node_modules
-        run: rm -rf node_modules
-
-      # Step 4: Install ONLY production dependencies
-      - name: npm ci (production only)
-        run: npm ci --omit=dev
-
       # No need to cache node_modules directly if caching ~/.npm, 
       # `npm ci` will reconstruct node_modules quickly from the global cache.
 
