@@ -64,14 +64,12 @@ jobs:
       # Step 5: Prepare artifact directory
       - name: Create artifact directory structure
         run: |
-          mkdir -p artifact/dist
-          mkdir -p artifact/node_modules
+          mkdir -p artifact/dist # Only need dist and package files
 
       # Step 6: Copy necessary files to artifact directory
       - name: Copy production files to artifact directory
         run: |
           cp -r dist/* artifact/dist/ # Copy compiled code
-          cp -r node_modules/* artifact/node_modules/ # Copy production node_modules
           cp package.json artifact/
           cp package-lock.json artifact/
           # Add any other necessary runtime files here, e.g.:
