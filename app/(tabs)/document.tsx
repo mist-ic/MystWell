@@ -15,6 +15,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
 import { checkShouldShowDocumentModal } from '@/context/DocumentModalContext';
+import { Camera } from 'expo-camera';
 
 // Define API Base URL (TODO: Move to central config/env)
 const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
@@ -460,6 +461,13 @@ export default function DocumentScreen() {
   const handleScanDocument = async () => {
      if (isScanning || isUploading) return; 
 
+     // 1. Check/Request Camera Permissions
+     const { status } = await Camera.requestCameraPermissionsAsync();
+     if (status !== 'granted') {
+       Alert.alert('Permission Denied', 'Camera permission is required to scan documents.');
+       return;
+     }
+
      let documentId: string | null = null; 
      let storagePath: string | null = null; // Also declare storagePath outside
 
@@ -831,7 +839,7 @@ export default function DocumentScreen() {
          >
             <Text variant="titleLarge" style={{marginBottom: 24, textAlign: 'center'}}>Add Document</Text>
             
-            <View style={{flexDirection: 'row', justifyContent: 'space-around', width: '100%'}}>
+            <View style={styles.modalButtonContainer}> 
                 <Button 
                     mode="outlined"
                     icon="camera-outline"
@@ -839,7 +847,7 @@ export default function DocumentScreen() {
                         handleScanDocument();
                         setAddDocumentModalVisible(false);
                     }}
-                    style={{margin: 8, flexGrow: 1}}
+                    style={styles.modalButton}
                     contentStyle={{paddingVertical: 8}}
                     disabled={isScanning || isUploading}
                 >
@@ -853,7 +861,7 @@ export default function DocumentScreen() {
                         handleUploadDocument();
                         setAddDocumentModalVisible(false);
                     }}
-                    style={{margin: 8, flexGrow: 1}}
+                    style={styles.modalButton}
                     contentStyle={{paddingVertical: 8}}
                     disabled={isScanning || isUploading}
                 >
@@ -1013,4 +1021,14 @@ const styles = StyleSheet.create({
   dialogTitle: {
      textAlign: 'center',
   },
-}); 
+  // Add styles for modal buttons
+  modalButtonContainer: {
+    flexDirection: 'column', // Stack vertically
+    width: '100%',         // Take full width
+    alignItems: 'stretch', // Stretch buttons to fill width
+  },
+  modalButton: {
+    marginVertical: 8,    // Add vertical margin between buttons
+    // Removed flexGrow: 1
+  },
+});
