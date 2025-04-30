@@ -396,9 +396,6 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Spacer to prevent overlap with FAB */}
-         <View style={{ height: 100 }} />
-
       </ScrollView>
 
       {/* --- Simplified Modification Modal (like .old.home) --- */}
@@ -455,6 +452,7 @@ export default function HomeScreen() {
              open={fabOpen}
              visible={isHomeTab} // Only show on home tab
              icon={fabOpen ? 'close' : 'plus'}
+             color="white"
              actions={[
                { icon: 'microphone', label: 'Record', onPress: () => router.push('/(tabs)/record'), size: 'small' },
                { icon: 'bell-plus-outline', label: 'Add Reminder', onPress: () => router.push('/(tabs)/add'), size: 'small' },
@@ -488,7 +486,7 @@ const createStyles = (theme: MD3Theme, tabBarHeight: number) => StyleSheet.creat
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingBottom: tabBarHeight + 100, // Ensure enough space below content for FAB
+    paddingBottom: tabBarHeight, // Minimal padding, just enough for the tab bar
   },
   // Use header styles from .old.home
   headerContainer: {
@@ -544,7 +542,7 @@ const createStyles = (theme: MD3Theme, tabBarHeight: number) => StyleSheet.creat
   },
   // Use section styles from .old.home
   section: {
-    marginBottom: 32,
+    marginBottom: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
