@@ -71,6 +71,15 @@ const formatItemDate = (dateString: string): string => {
   }
 };
 
+// Simple UUID generation
+const generateUUID = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 // Format a date for display in section headers - updated to show "Today"/"Yesterday"
 const formatSectionDate = (dateString: string): string => {
   try {
@@ -847,42 +856,68 @@ function RecordScreenContent() {
 
       // 2. Get upload URL from backend
       console.log('Requesting upload URL...');
+      try {
+        const response = await fetch(`${API_BASE_URL}/recordings/upload-url`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session?.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to get upload URL: ${response.status} ${response.statusText}`);
+        }
+        
+        const { uploadUrl, storagePath, recordingId } = await response.json();
+        console.log('Got upload URL for recordingId:', recordingId);
+        
+        // Store the info for upload after recording
+        activeUploadInfo.current = {
+          recordingId,
+          uploadUrl,
+          storagePath
+        };
+      } catch (error: any) {
+        console.error('Error getting upload URL:', error);
+        throw new Error(`Failed to get upload URL: ${error.message}`);
+      }
+      
+      // Define recording options for all platforms to avoid the error
       const recordingOptions: Audio.RecordingOptions = {
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY_16000, // Start with a quality preset
-        ...(Platform.OS === 'android' && { // Apply Android specific overrides
-          android: {
-            extension: '.wav', // Use WAV container
-            outputFormat: Audio.AndroidOutputFormat.DEFAULT, // Let system choose based on encoder/extension
-            audioEncoder: Audio.AndroidAudioEncoder.DEFAULT, // Default encoder (should choose PCM for WAV)
-            sampleRate: 16000, // Common rate for speech recognition
-            numberOfChannels: 1, // Mono is typical for speech
-            // Bitrate for PCM = SampleRate * BitDepth * Channels
-            // Assuming 16-bit depth (implied by PCM_16BIT intent, common for WAV)
-            bitRate: 16000 * 16 * 1, 
-          },
-          web: {
-            // Keep web defaults or specify if needed, e.g., Opus
-            // mimeType: 'audio/webm;codecs=opus',
-            // bitsPerSecond: 128000, 
-          },
-        }),
-        ...(Platform.OS === 'ios' && { // iOS specific options
-          ios: {
-            extension: '.wav', // Also use WAV on iOS for consistency
-            outputFormat: Audio.IOSOutputFormat.LINEARPCM,
-            audioQuality: Audio.IOSAudioQuality.MAX,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 16000 * 16 * 1, // PCM Bitrate
-            linearPCMBitDepth: 16,
-            linearPCMIsBigEndian: false,
-            linearPCMIsFloat: false,
-          },
-        }),
+        android: {
+          extension: '.wav',
+          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 16000 * 16 * 1,
+        },
+        ios: {
+          extension: '.wav',
+          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+          audioQuality: Audio.IOSAudioQuality.MAX,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 16000 * 16 * 1,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 128000,
+        }
       };
 
+      // Set audio mode for iOS
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
       const { recording } = await Audio.Recording.createAsync(
-        recordingOptions, // Use the constructed options object
+        recordingOptions,
         (status) => {
           // Update audio level for visualization (optional)
           if (status.isRecording) {

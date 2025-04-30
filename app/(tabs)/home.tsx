@@ -7,8 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ReminderItem } from '@/components/ui/ReminderItem'; // Ensure correct import path
 import { QuickActionCard } from '@/components/ui/Card/QuickActionCard';
 import { useRouter, usePathname, useFocusEffect } from 'expo-router';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker'; // Use this directly if needed
-import DateTimePickerModal from "react-native-modal-datetime-picker"; // Used in old code for modify date picker
+import PlatformDateTimePicker from '@/components/ui/PlatformDateTimePicker';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useDocumentModal } from '@/context/DocumentModalContext';
@@ -435,7 +434,7 @@ export default function HomeScreen() {
         </Modal>
 
          {/* --- Date Picker Modal (from .old.home) --- */}
-         <DateTimePickerModal
+         <PlatformDateTimePicker
            isVisible={isDatePickerVisible}
            mode="date" // Old modal only modified date
            onConfirm={handleConfirmDate}
@@ -454,12 +453,33 @@ export default function HomeScreen() {
              icon={fabOpen ? 'close' : 'plus'}
              color="white"
              actions={[
-               { icon: 'microphone', label: 'Record', onPress: () => router.push('/(tabs)/record'), size: 'small' },
-               { icon: 'bell-plus-outline', label: 'Add Reminder', onPress: () => router.push('/(tabs)/add'), size: 'small' },
-               { icon: 'file-plus-outline', label: 'Add Document', onPress: showAddDocumentModal, size: 'small' },
+               { 
+                 icon: 'microphone', 
+                 label: 'Record', 
+                 onPress: () => router.push('/(tabs)/record'),
+                 size: 'small',
+                 // Add style to prevent button nesting
+                 containerStyle: { pointerEvents: 'auto' }
+               },
+               { 
+                 icon: 'bell-plus-outline', 
+                 label: 'Add Reminder', 
+                 onPress: () => router.push('/(tabs)/add'),
+                 size: 'small',
+                 // Add style to prevent button nesting
+                 containerStyle: { pointerEvents: 'auto' }
+               },
+               { 
+                 icon: 'file-plus-outline', 
+                 label: 'Add Document', 
+                 onPress: showAddDocumentModal,
+                 size: 'small',
+                 // Add style to prevent button nesting
+                 containerStyle: { pointerEvents: 'auto' }
+               },
              ]}
              onStateChange={({ open }) => setFabOpen(open)}
-             onPress={() => { /* No action needed on main FAB press */ }}
+             onPress={() => {}}
              style={styles.fabGroupStyle} // Use specific style name
              fabStyle={styles.fabStyle} // Use specific style name
            />
