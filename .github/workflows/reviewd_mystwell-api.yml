@@ -68,7 +68,11 @@ jobs:
           # cp .env.production artifact/
           # cp -r public artifact/  (if you have static assets)
 
-      # Step 7: Zip the prepared artifact directory
+      # Step 7: List artifact contents for verification
+      - name: List artifact directory contents
+        run: ls -la artifact/
+
+      # Step 8: Zip the prepared artifact directory
       - name: Zip artifact directory for deployment
         run: |
           cd artifact
