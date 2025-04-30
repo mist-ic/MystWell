@@ -6,89 +6,64 @@ on:
       - Backy
   workflow_dispatch:
 
+# Add concurrency to cancel duplicate runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # Shallow clone for faster checkout
 
       - name: Set up Node.js version
-        id: setup-node # Add an ID to reference the Node version
+        id: setup-node
         uses: actions/setup-node@v3
         with:
           node-version: '22.x'
+          cache: 'npm' # Use built-in npm caching
 
-      - name: Cache Node.js modules
-        id: cache-nodemodules # Add an ID for cache hit checking
+      # Cache both npm and node_modules for faster builds
+      - name: Cache node_modules
         uses: actions/cache@v4
-        env:
-          cache-name: cache-node-modules
+        id: cache-node-modules
         with:
-          # npm cache files are stored in `~/.npm` on Linux/macOS
-          path: ~/.npm 
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: | # Fallback keys
-            ${{ runner.os }}-build-${{ env.cache-name }}-${{ steps.setup-node.outputs.node-version }}-
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
+          path: node_modules
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-modules-
 
-      # Use cache hit status to potentially skip install if needed, but `npm ci` handles this efficiently
-      # - name: Display cache hit status
-      #   if: steps.cache-nodemodules.outputs.cache-hit == 'true'
-      #   run: echo "Cache hit! node_modules restored from cache."
+      # Only run npm ci if cache miss
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit
 
-      # Step 1: Install ALL dependencies (needed for build tools like @nestjs/cli)
-      # `npm ci` will use the cache if available and is faster/safer than `npm install`
-      - name: npm ci (all dependencies)
-        run: npm ci
+      - name: Build application
+        run: npm run build --if-present
 
-      # Step 2: Build the application (uses dev dependencies)
-      - name: npm run build
-        run: npm run build
-
-      # No need to cache node_modules directly if caching ~/.npm, 
-      # `npm ci` will reconstruct node_modules quickly from the global cache.
-
-      # Step 5: Prepare artifact directory
-      - name: Create artifact directory structure
+      # Fast deployment approach - create minimal package
+      - name: Create deployment package
         run: |
-          mkdir -p artifact/dist # Only need dist and package files
+          mkdir -p deploy
+          cp -r dist deploy/
+          cp package.json package-lock.json deploy/
+          cd deploy && npm ci --omit=dev --prefer-offline --no-audit
+          # Remove unnecessary files to reduce package size
+          find . -name "*.map" -type f -delete
+          cd .. && zip -r release.zip deploy
 
-      # Step 6: Copy necessary files to artifact directory
-      - name: Copy production files to artifact directory
-        run: |
-          cp -r dist/* artifact/dist/ # Copy compiled code
-          cp package.json artifact/
-          cp package-lock.json artifact/
-          # Add any other necessary runtime files here, e.g.:
-          # cp .env.production artifact/
-          # cp -r public artifact/  (if you have static assets)
-
-      # Step 7: Install production dependencies in artifact directory
-      - name: Install production dependencies
-        run: |
-          cd artifact
-          npm ci --only=production
-          
-      # Step 8: List artifact contents for verification
-      - name: List artifact directory contents
-        run: ls -la artifact/
-
-      # Step 9: Zip the prepared artifact directory
-      - name: Zip artifact directory for deployment
-        run: |
-          cd artifact
-          zip -r ../release.zip ./*
-
-      - name: Upload artifact for deployment job
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: release.zip # Upload the lean zip
+          path: release.zip
+          retention-days: 1 # Lower retention to save space
 
   deploy:
     runs-on: ubuntu-latest
@@ -97,16 +72,16 @@ jobs:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: node-app
-          # It will download release.zip to the root of the runner workspace
-      
+
+      # Login with managed identity for faster auth
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -114,10 +89,10 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F7C94749BE64D22A5CA9B76A74636E4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1D3F8F2A20EA4FDCB691B7F4246B9276 }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'mystwell-api'
           slot-name: 'Production'
-          package: release.zip # Deploy the zip file directly
+          package: release.zip

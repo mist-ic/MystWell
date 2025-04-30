@@ -143,12 +143,12 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
       };
 
       // 5. Call Gemini API
-      this.logger.log(`Calling Gemini API (model: gemini-1.5-flash-latest) for document ${documentId}...`);
+      this.logger.log(`Calling Gemini API (model: gemini-2.5-flash-preview-04-17) for document ${documentId}...`);
       
       let extractedJson: any;
       try {
         const model = this.googleAiClient.getGenerativeModel({
-            model: "gemini-1.5-flash-latest",
+            model: "gemini-2.5-flash-preview-04-17",
             safetySettings: [
                   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -158,7 +158,20 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
             generationConfig: { responseMimeType: "application/json" },
         });
 
-        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information. \nRespond ONLY with a valid JSON object adhering to the following structure. Do NOT include any other text or formatting like backticks (\`\`\").\n\nJSON Structure:\n${JSON.stringify(schema, null, 2)}\n\nDocument Analysis:`;
+        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information.
+Please fill in the data fields with the actual information from the document. 
+DO NOT return the schema definition - only return actual data values extracted from the document.
+Respond ONLY with a JSON object containing the extracted information. Do NOT include backticks or any other text.
+
+For example, your response should be of the form:
+{
+  "headerDescription": "This is a lab report for patient...",
+  "detected_document_type": "Lab Report",
+  "patient_name": "John Doe",
+  ...
+}
+
+Document Analysis:`;
         const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
         
         const parts = [ { text: prompt }, filePart ];
@@ -181,14 +194,23 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           this.logger.log('Successfully parsed Gemini response text as JSON.');
         } catch (parseError) {
           this.logger.error(`Failed to parse Gemini response text as JSON for document ${documentId}`, parseError.stack);
-          const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
-          try {
-            extractedJson = JSON.parse(cleanedText);
-            this.logger.log('Successfully parsed cleaned Gemini response text as JSON.');
-          } catch (cleanedParseError) {
-            this.logger.error(`Failed to parse even cleaned Gemini response text as JSON for document ${documentId}`, cleanedParseError.stack);
-            await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Failed to parse Gemini response as JSON');
-            // No point in retrying parse errors as they are deterministic
+          // Try to extract JSON from the response if it's wrapped in text or code blocks
+          const jsonRegex = /\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\}/;
+          const match = responseText.match(jsonRegex);
+          
+          if (match && match[0]) {
+            try {
+              extractedJson = JSON.parse(match[0]);
+              this.logger.log('Successfully extracted and parsed JSON from Gemini response.');
+            } catch (extractError) {
+              this.logger.error(`Failed to extract valid JSON from response for document ${documentId}`, extractError.stack);
+              await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Failed to extract JSON from Gemini response');
+              return { success: false, error: 'json_parse_error' };
+            }
+          } else {
+            // No JSON-like structure found
+            this.logger.error(`No JSON-like structure found in response for document ${documentId}`);
+            await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'No valid JSON found in Gemini response');
             return { success: false, error: 'json_parse_error' };
           }
         }
@@ -224,11 +246,38 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
 
       this.logger.log(`Gemini call successful for document ${documentId}.`);
 
-      if (!extractedJson || typeof extractedJson !== 'object' || !extractedJson.detected_document_type) {
-        this.logger.error(`Invalid or incomplete JSON structure received from Gemini for ${documentId}: ${JSON.stringify(extractedJson)}`);
-        await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Invalid or incomplete JSON structure received from Gemini');
-        // Don't retry for invalid responses
+      // Enhanced validation with repair attempts
+      if (!extractedJson || typeof extractedJson !== 'object') {
+        this.logger.error(`Invalid JSON structure received from Gemini for ${documentId}: ${JSON.stringify(extractedJson)}`);
+        await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Invalid JSON structure received from Gemini');
         return { success: false, error: 'invalid_response' };
+      }
+      
+      // If we got a schema definition instead of data, attempt to create a basic valid object
+      if (extractedJson.type && extractedJson.properties && !extractedJson.detected_document_type) {
+        this.logger.warn(`Received schema instead of data for ${documentId} - attempting to create valid object`);
+        
+        const repaired = {
+          detected_document_type: "Unknown Document",
+          headerDescription: displayName || "Document could not be fully analyzed",
+          patient_name: null,
+          date_of_service: null,
+          provider_name: null,
+          key_information: ["Document processing partial - please check the original document"],
+          medications_mentioned: [],
+          follow_up_instructions: null,
+          summary: "Document processing could not extract detailed information. Please refer to the original document."
+        };
+        
+        extractedJson = repaired;
+        this.logger.log(`Created basic valid object for document ${documentId}`);
+      }
+      
+      // Final check for required field
+      if (!extractedJson.detected_document_type) {
+        // Add a default value if missing
+        extractedJson.detected_document_type = "Unknown Document";
+        this.logger.warn(`Added default document type for ${documentId}`);
       }
 
       // 6. ---> Generate Embedding <--- 
