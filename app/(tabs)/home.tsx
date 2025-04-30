@@ -1,101 +1,88 @@
-import React, { useState, useCallback, useMemo, useEffect, createContext, useContext } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
-import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button, MD3Theme } from 'react-native-paper';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { ScrollView, StyleSheet, View, TouchableOpacity, Platform, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { Text, useTheme, FAB, Avatar, Portal, Modal, TextInput, Button, MD3Theme, Chip, Divider } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { StatusItem } from '@/components/ui/StatusItem';
-import { ReminderItem, ReminderType } from '@/components/ui/ReminderItem';
+// Removed StatusItem import as it wasn't used in old code
+import { ReminderItem } from '@/components/ui/ReminderItem'; // Ensure correct import path
 import { QuickActionCard } from '@/components/ui/Card/QuickActionCard';
-import { useRouter, usePathname } from 'expo-router';
-import DateTimePickerModal from "react-native-modal-datetime-picker";
+import { useRouter, usePathname, useFocusEffect } from 'expo-router';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker'; // Use this directly if needed
+import DateTimePickerModal from "react-native-modal-datetime-picker"; // Used in old code for modify date picker
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useDocumentModal } from '@/context/DocumentModalContext';
-import { useAuth } from '@/context/auth'; // Import useAuth
+import { useAuth } from '@/context/auth';
+import { format, parseISO, isValid } from 'date-fns';
 
-// Define a type for reminders if not already defined
-interface Reminder {
-  id: string;
-  title: string;
-  schedule: string; // Could represent time or general schedule
-  date?: string; // Added optional date for appointments
-  type: ReminderType;
-  medicineIdentifier?: string;
+// --- Backend Reminder Type Definition ---
+export enum FrequencyType {
+  DAILY = 'daily',
+  SPECIFIC_DAYS = 'specific_days',
+  INTERVAL = 'interval',
+  AS_NEEDED = 'as_needed',
 }
 
-// Sample data (replace with actual data fetching logic)
-const initialReminders: Reminder[] = [
-  {
-    id: '1',
-    title: "Take MB Multivitamin",
-    schedule: "Morning",
-    type: "meal",
-    medicineIdentifier: "MB Multivitamin",
-  },
-  {
-    id: '2',
-    title: "Take Creatine",
-    schedule: "After gym",
-    type: "meal",
-    medicineIdentifier: "Creatine 5g",
-  },
-  {
-    id: '3',
-    title: "Take Dolo 650mg",
-    schedule: "After dinner",
-    type: "meal",
-    medicineIdentifier: "Dolo 650mg",
-  },
-  {
-    id: '4',
-    title: "Drink Protein Shake",
-    schedule: "Post workout",
-    type: "meal",
-    medicineIdentifier: "Whey Protein",
-  },
-  {
-    id: '5',
-    title: "Take Fish Oil",
-    schedule: "With breakfast",
-    type: "meal",
-    medicineIdentifier: "Omega 3 Fish Oil",
-  },
-  {
-    id: '6',
-    title: "Gym Session",
-    schedule: "5:30 PM",
-    type: "appointment",
-  },
-];
+interface BackendReminder {
+  id: string; // UUID
+  title: string;
+  notes?: string | null;
+  frequency_type: FrequencyType;
+  times_of_day: string[]; // Array of HH:mm strings
+  days_of_week?: number[] | null; // Array of 0-6, null if not applicable
+  interval_days?: number | null; // Null if not applicable
+  start_date: string; // YYYY-MM-DD string
+  end_date?: string | null; // YYYY-MM-DD string, null if not set
+  is_active: boolean;
+  created_at: string; // ISO timestamp string
+  updated_at: string; // ISO timestamp string
+  user_id: string; // UUID
+}
+// --- End Backend Reminder Type Definition ---
+
+// --- Modification Form State ---
+// NOTE: The old code used a simpler modification modal (only schedule/date)
+// We keep the more detailed modification form state from the previous step
+// as it aligns better with the backend capabilities, but the old modal UI is simpler.
+interface ModifyReminderFormState {
+  title: string;
+  notes: string;
+  frequency_type: FrequencyType;
+  days_of_week: number[];
+  times_of_day: Date[];
+  interval_days: number | null;
+  start_date: Date;
+  end_date: Date | null;
+}
+// --- End Modification Form State ---
 
 export default function HomeScreen() {
   const theme = useTheme<MD3Theme>();
   const router = useRouter();
-  const pathname = usePathname(); // Get current route path
-  const [reminders, setReminders] = useState<Reminder[]>(initialReminders);
+  const pathname = usePathname();
+  const { profile, session } = useAuth();
+  const [reminders, setReminders] = useState<BackendReminder[]>([]);
   const { showAddDocumentModal } = useDocumentModal();
-  const { profile } = useAuth(); // Get profile from auth context
-  
-  // --- State for Modification Modal ---
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // --- Modification Modal State (More detailed form state, but use old modal UI for simplicity) ---
   const [isModifyModalVisible, setIsModifyModalVisible] = useState(false);
-  const [reminderToModify, setReminderToModify] = useState<Reminder | null>(null);
+  const [reminderToModify, setReminderToModify] = useState<BackendReminder | null>(null);
+  // Use simpler state from old code for the simple modal UI
   const [modifiedSchedule, setModifiedSchedule] = useState('');
-  const [modifiedDate, setModifiedDate] = useState<Date | undefined>(undefined); // Use Date object
-  const [isDatePickerVisible, setDatePickerVisibility] = useState(false); // State for date picker modal
-  
-  // --- State for Add Reminder Modal ---
-  const [isAddReminderModalVisible, setIsAddReminderModalVisible] = useState(false);
-  
-  // --- Simplified Cart State (Example) ---
-  const [cartItems, setCartItems] = useState<string[]>([]); // Store medicine identifiers
-  
-  // --- State for FAB Group ---
+  const [modifiedDate, setModifiedDate] = useState<Date | undefined>(undefined);
+  const [isDatePickerVisible, setDatePickerVisibility] = useState(false);
+  const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
+  // --- End Modification Modal State ---
+
+  // --- FAB state from .old.home ---
   const [fabOpen, setFabOpen] = useState(false);
-  
-  // --- State for greeting ---
+  // --- End FAB state ---
+
   const [greeting, setGreeting] = useState('Hello');
-  
-  // Get the bottom tab bar height
+
   let tabBarHeight = 0;
   try {
     tabBarHeight = useBottomTabBarHeight();
@@ -104,19 +91,13 @@ export default function HomeScreen() {
     tabBarHeight = 60; // Example fallback
   }
 
-  // Set greeting based on time of day
   useEffect(() => {
     const hour = new Date().getHours();
-    if (hour < 12) {
-      setGreeting('Good morning');
-    } else if (hour < 18) {
-      setGreeting('Good afternoon');
-    } else {
-      setGreeting('Good evening');
-    }
+    if (hour < 12) setGreeting('Good morning');
+    else if (hour < 18) setGreeting('Good afternoon');
+    else setGreeting('Good evening');
   }, []);
 
-  // Format current date to display in header
   const formattedDate = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -124,115 +105,213 @@ export default function HomeScreen() {
     return `${days[now.getDay()]}, ${months[now.getMonth()]} ${now.getDate()}`;
   }, []);
 
-  // Create styles inside the component using a memoized factory
-  const styles = React.useMemo(() => createStyles(theme), [theme]);
+  const styles = React.useMemo(() => createStyles(theme, tabBarHeight), [theme, tabBarHeight]); // Pass tabBarHeight
 
-  // --- Handlers for Date Picker ---
-  const showDatePicker = () => {
-    setDatePickerVisibility(true);
-  };
+  // --- API Call Helper ---
+  const callApi = useCallback(async (endpoint: string, method: string, body?: any) => {
+    const backendUrl = process.env.EXPO_PUBLIC_API_URL;
+    if (!backendUrl) throw new Error("Backend API URL is not configured.");
+    const accessToken = session?.access_token;
+    if (!accessToken) throw new Error("Authentication token is missing.");
 
-  const hideDatePicker = () => {
-    setDatePickerVisibility(false);
-  };
-
-  const handleConfirmDate = (date: Date) => {
-    setModifiedDate(date); // Store selected date
-    hideDatePicker();
-  };
-
-  const handleUpdateReminderStatus = useCallback((id: string, status: 'completed' | 'skipped' | 'modify' | 'refill') => {
-    setReminders(prevReminders => {
-      const itemIndex = prevReminders.findIndex(r => r.id === id);
-      if (itemIndex === -1) return prevReminders; 
-
-      const item = prevReminders[itemIndex];
-      let updatedList = [...prevReminders];
-
-      if (status === 'completed') {
-        updatedList.splice(itemIndex, 1);
-        updatedList.push(item);
-      } else if (status === 'skipped') {
-        updatedList.splice(itemIndex, 1);
-      } else if (status === 'refill') {
-        console.log("Refill requested for:", item.medicineIdentifier || item.title);
-        if (item.medicineIdentifier) {
-          setCartItems(prevCart => [...prevCart, item.medicineIdentifier!]);
-          console.log("Added to cart:", item.medicineIdentifier);
-          router.push('/cart'); 
-        } else {
-          console.warn("Cannot refill, medicine identifier missing for:", item.title);
-        }
-        updatedList.splice(itemIndex, 1);
-      } else if (status === 'modify') {
-        setReminderToModify(item);
-        setModifiedSchedule(item.schedule); 
-        setModifiedDate(item.date ? new Date(item.date) : undefined); 
-        setIsModifyModalVisible(true);
-        return prevReminders; 
-      }
-      return updatedList; 
+    const response = await fetch(`${backendUrl}${endpoint}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      body: body ? JSON.stringify(body) : undefined,
     });
-  }, [router]);
 
-  // --- Handlers for Modification Modal ---
-  const handleSaveChanges = () => {
-    if (!reminderToModify) return;
-    const formattedDate = modifiedDate ? modifiedDate.toISOString().split('T')[0] : undefined; // Format date back to YYYY-MM-DD
-    console.log(`Saving changes for ${reminderToModify.id}: New Date - ${formattedDate}, New schedule - ${modifiedSchedule}`);
-    setReminders(prev => prev.map(r => 
-      r.id === reminderToModify.id ? { ...r, date: formattedDate, schedule: modifiedSchedule } : r
-    ));
-    closeModifyModal();
-  };
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(`API Error (${response.status}): ${errorData.message || 'Unknown error'}`);
+    }
+    return response.status === 204 ? null : await response.json();
+  }, [session]);
+
+  // --- Fetch Reminders Logic ---
+  const fetchReminders = useCallback(async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const fetchedReminders = await callApi('/reminders', 'GET');
+      setReminders(fetchedReminders || []);
+    } catch (err: any) {
+      console.error("Error fetching reminders:", err);
+      setError(err.message || 'Failed to load reminders. Pull down to refresh.');
+      setReminders([]);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [callApi]);
+
+  useFocusEffect(useCallback(() => { fetchReminders(); }, [fetchReminders]));
+  const onRefresh = useCallback(() => { setIsRefreshing(true); fetchReminders(); }, [fetchReminders]);
+  // --- End Fetch Reminders Logic ---
+
+  // --- Modification Modal Handlers (Simplified like .old.home) ---
+   const openModifyModal = (reminder: BackendReminder) => {
+     setReminderToModify(reminder);
+     // Attempt to parse the schedule string for time, fall back otherwise
+     // This is brittle, ideally backend provides structured time/date info
+     const timeMatch = reminder.times_of_day[0]; // Just use first time for simplicity
+     setModifiedSchedule(timeMatch || formatSchedule(reminder)); // Fallback to full schedule string
+
+     // Use start_date as the initial date for the picker
+     const initialDate = parseISO(reminder.start_date + 'T00:00:00');
+     setModifiedDate(isValid(initialDate) ? initialDate : new Date());
+
+     setIsModifyModalVisible(true);
+   };
 
   const closeModifyModal = () => {
     setIsModifyModalVisible(false);
     setReminderToModify(null);
     setModifiedSchedule('');
-    setModifiedDate(undefined); // Reset date state
+    setModifiedDate(undefined);
   };
 
-  // Calculate the percent elapsed between last check and next check
-  const progressPercent = 65; // Example value - replace with actual calculation
+  const handleConfirmDate = (date: Date) => {
+    setModifiedDate(date);
+    setDatePickerVisibility(false);
+  };
 
-  // Ensure this FAB only appears on the home tab
+  const handleSaveChanges = async () => {
+     if (!reminderToModify || !modifiedDate) return;
+
+     // --- Prepare Update DTO (Simplified based on old modal) ---
+     // This only updates title (kept same), start_date and the first time_of_day
+     // Other fields like frequency, notes, end_date, days_of_week etc. remain unchanged
+     // WARNING: This is a simplified PATCH based on the old UI.
+     // For full updates, the more detailed modal from previous steps is needed.
+     const updateDto = {
+         // title: reminderToModify.title, // Title usually doesn't change in simple modify
+         start_date: format(modifiedDate, 'yyyy-MM-dd'),
+         // Attempt to update the first time slot based on modifiedSchedule
+         // Assuming modifiedSchedule is HH:mm format, otherwise this will be wrong
+         times_of_day: [modifiedSchedule || reminderToModify.times_of_day[0] || '09:00', ...reminderToModify.times_of_day.slice(1)],
+         // Keep other fields potentially from the original reminder if PATCH needs them
+         // notes: reminderToModify.notes,
+         // frequency_type: reminderToModify.frequency_type,
+         // days_of_week: reminderToModify.days_of_week,
+         // interval_days: reminderToModify.interval_days,
+         // end_date: reminderToModify.end_date,
+     };
+     // --- End Prepare DTO ---
+
+     console.log('Submitting Simplified Update DTO:', JSON.stringify(updateDto, null, 2));
+     setIsSubmittingUpdate(true);
+
+     try {
+         await callApi(`/reminders/${reminderToModify.id}`, 'PATCH', updateDto);
+         Alert.alert('Success', 'Reminder updated (simplified).');
+         closeModifyModal();
+         fetchReminders(); // Refresh list
+     } catch (err: any) {
+         console.error("Error updating reminder (simplified):", err);
+         Alert.alert('Error', `Failed to update reminder: ${err.message}`);
+     } finally {
+         setIsSubmittingUpdate(false);
+     }
+   };
+  // --- End Simplified Modification Handlers ---
+
+
+  // --- Delete Reminder Handler ---
+  const handleDeleteReminder = (id: string, title: string) => {
+    Alert.alert(
+      "Confirm Deletion", `Are you sure you want to delete "${title}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          onPress: async () => {
+            setIsLoading(true);
+            try {
+              await callApi(`/reminders/${id}`, 'DELETE');
+              Alert.alert('Success', 'Reminder deleted.');
+              fetchReminders();
+            } catch (err: any) {
+              console.error("Error deleting reminder:", err);
+              Alert.alert('Error', `Failed to delete reminder: ${err.message}`);
+              setIsLoading(false);
+            }
+          },
+          style: "destructive"
+        }
+      ]
+    );
+  };
+  // --- End Delete Reminder Handler ---
+
+
+  // --- Reminder Item Action Handler ---
+  // Matches .old.home's handleUpdateReminderStatus structure
+  const handleUpdateReminderStatus = useCallback((id: string, action: 'completed' | 'skipped' | 'modify' | 'refill') => {
+    const reminder = reminders.find(r => r.id === id);
+    if (!reminder) return;
+
+    console.log(`Action '${action}' triggered for reminder:`, reminder.title);
+
+    if (action === 'modify') {
+        openModifyModal(reminder); // Open the simplified modal
+    } else if (action === 'skipped' || action === 'completed') {
+        // Treat both as delete for now (like .old.home local logic)
+        handleDeleteReminder(id, reminder.title);
+    } else if (action === 'refill') {
+        // This action was present in old item but doesn't fit backend model well
+        console.log("Refill action triggered but not implemented for backend:", reminder.title);
+        // Optionally navigate to cart or show message
+        // For now, we might just delete it like skipped/completed
+        handleDeleteReminder(id, reminder.title);
+    }
+  }, [reminders, callApi, fetchReminders]); // Dependencies
+  // --- End Reminder Item Action Handler ---
+
+
+  // --- Helper to format schedule string for display ---
+  const formatSchedule = (reminder: BackendReminder): string => {
+      // Keep the detailed formatter
+      const timeString = reminder.times_of_day.join(', ');
+      switch (reminder.frequency_type) {
+          case FrequencyType.DAILY: return `Daily at ${timeString}`;
+          case FrequencyType.SPECIFIC_DAYS:
+              const days = reminder.days_of_week?.map(d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ') || 'days';
+              return `On ${days} at ${timeString}`;
+          case FrequencyType.INTERVAL: return `Every ${reminder.interval_days} days at ${timeString}`;
+          case FrequencyType.AS_NEEDED: return 'As Needed';
+          default: return `Scheduled: ${timeString}`; // Fallback
+      }
+  };
+  // --- End Helper ---
+
+
+  const progressPercent = 65; // Example value from old code
   const isHomeTab = pathname === '/(tabs)/home' || pathname === '/home';
-  console.log('Current pathname:', pathname, 'isHomeTab:', isHomeTab);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <StatusBar style="dark" />
-      
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Top Bar */}
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+      >
+        {/* Top Bar - From .old.home */}
         <View style={styles.headerContainer}>
-          {/* App Name */}
           <Text variant="headlineMedium" style={styles.appTitle}>MystWell</Text>
-          {/* User Avatar */}
-          <TouchableOpacity 
-            style={styles.avatarButton}
-            onPress={() => router.push('/profile')}
-            accessibilityLabel="Open profile"
-          >
-            <Avatar.Icon 
-              size={40} 
-              icon="account" 
-              style={styles.avatar}
-              color={theme.colors.onPrimaryContainer}
-            />
+          <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')} accessibilityLabel="Open profile">
+            <Avatar.Icon size={40} icon="account" style={styles.avatar} color={theme.colors.onPrimaryContainer}/>
           </TouchableOpacity>
         </View>
 
-        {/* Greeting */}
+        {/* Greeting - From .old.home */}
         <View style={styles.greetingContainer}>
           <Text variant="titleLarge" style={styles.greetingText}>
-            {/* Use profile name with fallback */}
             {greeting}, {profile?.full_name || 'there'} 👋
           </Text>
         </View>
 
-        {/* Progress Indicator */}
+        {/* Progress Indicator - From .old.home */}
         <View style={styles.progressContainer}>
           <View style={styles.progressLabelContainer}>
             <Text style={styles.progressLabel}>Last check: 2 days ago</Text>
@@ -243,269 +322,175 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Reminders Section */}
+        {/* Reminders Section - Structure from .old.home */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text variant="titleLarge" style={styles.sectionTitle}>
-              Today's Reminders
-            </Text>
+            <Text variant="titleLarge" style={styles.sectionTitle}>Today's Reminders</Text>
             <Text variant="bodyMedium" style={styles.date}>{formattedDate}</Text>
           </View>
 
-          {/* Container with reminders */}
-          <View style={styles.remindersContainer}>
-            {reminders.length > 0 ? (
-              <ScrollView 
-                nestedScrollEnabled={true}
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={styles.remindersList}>
-                  {reminders.map((reminder, index) => (
-                    <ReminderItem
-                      key={reminder.id}
-                      id={reminder.id}
-                      title={reminder.title}
-                      schedule={reminder.schedule}
-                      type={reminder.type}
-                      isTopReminder={index === 0}
-                      onUpdateStatus={handleUpdateReminderStatus}
-                    />
-                  ))}
+           {isLoading && <ActivityIndicator animating={true} size="large" style={{ marginVertical: 20 }} />}
+
+           {!isLoading && error && (
+               <View style={styles.errorContainer}>
+                   <Text style={styles.errorText}>{error}</Text>
+                   <Button mode="outlined" onPress={fetchReminders}>Try Again</Button>
+               </View>
+           )}
+
+           {/* Reminder Container from .old.home */}
+           {!isLoading && !error && (
+                <View style={styles.remindersContainer}>
+                  {reminders.length > 0 ? (
+                    <ScrollView
+                      nestedScrollEnabled={true}
+                      showsVerticalScrollIndicator={false}
+                    >
+                      <View style={styles.remindersList}>
+                        {reminders.map((reminder, index) => (
+                          <ReminderItem
+                            key={reminder.id}
+                            id={reminder.id}
+                            title={reminder.title}
+                            schedule={formatSchedule(reminder)} // Use detailed schedule
+                            // Determine type based on old logic (or default)
+                            // This is heuristic, backend should ideally provide type
+                            type={reminder.title.toLowerCase().includes('session') || reminder.title.toLowerCase().includes('appointment') ? 'appointment' : 'meal'}
+                            isTopReminder={index === 0}
+                            onUpdateStatus={handleUpdateReminderStatus} // Use the handler matching old prop
+                          />
+                        ))}
+                      </View>
+                    </ScrollView>
+                  ) : (
+                     <View style={styles.emptyRemindersContainer}>
+                         <Text style={styles.emptyRemindersText}>No reminders for today!</Text>
+                         <Button
+                           mode="contained"
+                           icon="plus"
+                           style={styles.addReminderButton}
+                           onPress={() => router.push('/(tabs)/add')} // Go to add screen
+                         >
+                           Add Reminder
+                         </Button>
+                     </View>
+                  )}
                 </View>
-              </ScrollView>
-            ) : (
-              <View style={styles.emptyRemindersContainer}>
-                <Text style={styles.emptyRemindersText}>No reminders for today!</Text>
-                <Button 
-                  mode="contained" 
-                  icon="plus" 
-                  style={styles.addReminderButton}
-                  onPress={() => console.log('Add Reminder pressed')}
-                >
-                  Add Reminder
-                </Button>
-              </View>
             )}
-          </View>
         </View>
 
-        {/* Quick Actions Section */}
-        <View style={styles.section}>
-          <Text variant="titleLarge" style={styles.sectionTitle}>
-            Quick Actions
-          </Text>
-          <View style={styles.quickActionsGrid}>
-            <View style={styles.quickActionRow}>
-              <QuickActionCard
-                title="Record"
-                description="Capture your health data"
-                icon="microphone"
-                onPress={() => router.push('/record')}
-              />
-              <QuickActionCard
-                title="Medicine"
-                description="View & track medications"
-                icon="pill"
-                onPress={() => router.push('/add')}
-              />
-            </View>
-            <View style={styles.quickActionRow}>
-              <QuickActionCard
-                title="Add Document"
-                description="Manage medical documents"
-                icon="file-plus-outline"
-                onPress={() => showAddDocumentModal()}
-              />
-              <QuickActionCard
-                title="Health Buddy"
-                description="Get medical assistance"
-                icon="chat"
-                onPress={() => router.push('/chat')}
-              />
+        {/* Quick Actions Section - From .old.home */}
+        {!isLoading && !error && (
+          <View style={styles.section}>
+            <Text variant="titleLarge" style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsGrid}>
+              <View style={styles.quickActionRow}>
+                <QuickActionCard title="Record" description="Capture your health data" icon="microphone" onPress={() => router.push('/(tabs)/record')}/>
+                <QuickActionCard title="Add/Manage" description="View & track items" icon="pill" onPress={() => router.push('/(tabs)/add')}/>
+              </View>
+              <View style={styles.quickActionRow}>
+                <QuickActionCard title="Documents" description="Manage medical documents" icon="file-document-outline" onPress={() => router.push('/(tabs)/document')}/>
+                <QuickActionCard title="Health Buddy" description="Get medical assistance" icon="chat-question-outline" onPress={() => router.push('/(tabs)/chat')}/>
+              </View>
             </View>
           </View>
-        </View>
+        )}
+
+        {/* Spacer to prevent overlap with FAB */}
+         <View style={{ height: 100 }} />
+
       </ScrollView>
 
-      {/* --- Modification Modal --- */}
+      {/* --- Simplified Modification Modal (like .old.home) --- */}
       <Portal>
-        <Modal 
-          visible={isModifyModalVisible} 
-          onDismiss={closeModifyModal} 
-          contentContainerStyle={[styles.modifyModalContainer, { backgroundColor: theme.colors.surface }]} 
+        <Modal
+          visible={isModifyModalVisible}
+          onDismiss={closeModifyModal}
+          contentContainerStyle={[styles.modifyModalContainerStyle, { backgroundColor: theme.colors.surface }]} // Use specific style name
         >
           {reminderToModify && (
             <>
-              <Text variant="titleLarge" style={styles.modifyModalTitle}>Modify Appointment</Text>
+              <Text variant="titleLarge" style={styles.modifyModalTitle}>Modify Reminder</Text>
               <Text variant="titleMedium" style={styles.modifyModalSubTitle}>{reminderToModify.title}</Text>
-              
-              <TouchableOpacity onPress={showDatePicker} style={styles.datePickerButton}>
+
+              <TouchableOpacity onPress={() => setDatePickerVisibility(true)} style={styles.datePickerButton}>
                 <Text style={styles.datePickerButtonText}>
                   {modifiedDate ? modifiedDate.toLocaleDateString() : 'Select Date'}
                 </Text>
               </TouchableOpacity>
-              
+
               <TextInput
-                label="New Time/Schedule"
+                label="New Time/Schedule (e.g., HH:mm)" // Guide user
                 value={modifiedSchedule}
                 onChangeText={setModifiedSchedule}
                 mode="outlined"
                 style={styles.modifyInput}
+                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'} // Adjust keyboard
               />
               <View style={styles.modifyModalActions}>
-                <Button onPress={closeModifyModal} style={styles.modifyModalButton}>Cancel</Button>
-                <Button mode="contained" onPress={handleSaveChanges} style={styles.modifyModalButton}>Save Changes</Button>
+                <Button onPress={closeModifyModal} style={styles.modifyModalButton} disabled={isSubmittingUpdate}>Cancel</Button>
+                <Button mode="contained" onPress={handleSaveChanges} style={styles.modifyModalButton} loading={isSubmittingUpdate} disabled={isSubmittingUpdate}>
+                  {isSubmittingUpdate ? 'Saving...' : 'Save Changes'}
+                </Button>
               </View>
             </>
           )}
         </Modal>
-        
-        {/* Add Reminder Options Modal */}
-        <Modal
-          visible={isAddReminderModalVisible}
-          onDismiss={() => setIsAddReminderModalVisible(false)}
-          contentContainerStyle={[styles.modalContainer, { backgroundColor: theme.colors.surface }]}
-        >
-          <Text variant="titleLarge" style={styles.modalTitle}>Add Reminder</Text>
-          <Text variant="bodyMedium" style={styles.modalSubtitle}>Choose how you want to add a reminder</Text>
-          
-          <View style={styles.modalOptionsContainer}>
-            <TouchableOpacity 
-              style={styles.modalOption}
-              onPress={() => {
-                setIsAddReminderModalVisible(false);
-                // Add logic for manual reminder entry here
-                console.log("Add manually selected");
-              }}
-            >
-              <View style={styles.modalOptionIconContainer}>
-                <MaterialCommunityIcons name="pencil" size={24} color={theme.colors.primary} />
-              </View>
-              <View style={styles.modalOptionContent}>
-                <Text variant="titleMedium" style={styles.modalOptionTitle}>Add Manually</Text>
-                <Text variant="bodySmall" style={styles.modalOptionDescription}>
-                  Create a reminder by entering details yourself
-                </Text>
-              </View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.modalOption}
-              onPress={() => {
-                setIsAddReminderModalVisible(false);
-                // Navigate to recording screen
-                router.push('/record');
-              }}
-            >
-              <View style={styles.modalOptionIconContainer}>
-                <MaterialCommunityIcons name="microphone" size={24} color={theme.colors.primary} />
-              </View>
-              <View style={styles.modalOptionContent}>
-                <Text variant="titleMedium" style={styles.modalOptionTitle}>Record</Text>
-                <Text variant="bodySmall" style={styles.modalOptionDescription}>
-                  Create a reminder by recording your voice
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-          
-          <Button 
-            onPress={() => setIsAddReminderModalVisible(false)}
-            style={styles.modalCancelButton}
-          >
-            Cancel
-          </Button>
-        </Modal>
 
-        {/* --- Date Picker Modal --- */}
-        <DateTimePickerModal
-          isVisible={isDatePickerVisible}
-          mode="date"
-          onConfirm={handleConfirmDate}
-          onCancel={hideDatePicker}
-          date={modifiedDate || new Date()}
-        />
+         {/* --- Date Picker Modal (from .old.home) --- */}
+         <DateTimePickerModal
+           isVisible={isDatePickerVisible}
+           mode="date" // Old modal only modified date
+           onConfirm={handleConfirmDate}
+           onCancel={() => setDatePickerVisibility(false)}
+           date={modifiedDate || new Date()} // Use state date
+         />
       </Portal>
+      {/* --- End Simplified Modification Modal --- */}
 
-      {/* FAB for adding items - Using direct positioning instead of Portal */}
-      {isHomeTab && (
-        <>
-          <View style={[styles.fabContainer, { bottom: tabBarHeight + 16 }]}>
-            <FAB
-              icon="plus"
-              style={styles.fab}
-              onPress={() => setFabOpen(!fabOpen)} 
-              color={theme.colors.onPrimary}
-            />
-          </View>
-          
-          {fabOpen && (
-            <View style={[styles.fabMenu, { bottom: tabBarHeight + 16 + 56 }]}>
-              <TouchableOpacity 
-                style={styles.fabMenuItem}
-                onPress={() => {
-                  setFabOpen(false);
-                  router.push('/record');
-                }}
-              >
-                <View style={styles.fabMenuItemIcon}>
-                  <MaterialCommunityIcons name="microphone" size={20} color={theme.colors.primary} />
-                </View>
-                <Text style={styles.fabMenuItemText}>Record</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.fabMenuItem}
-                onPress={() => {
-                  setFabOpen(false);
-                  setIsAddReminderModalVisible(true);
-                }}
-              >
-                <View style={styles.fabMenuItemIcon}>
-                  <MaterialCommunityIcons name="bell-plus" size={20} color={theme.colors.primary} />
-                </View>
-                <Text style={styles.fabMenuItemText}>Add Reminder</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.fabMenuItem}
-                onPress={() => {
-                  setFabOpen(false);
-                  showAddDocumentModal();
-                }}
-              >
-                <View style={styles.fabMenuItemIcon}>
-                  <MaterialCommunityIcons name="file-plus" size={20} color={theme.colors.primary} />
-                </View>
-                <Text style={styles.fabMenuItemText}>Add Document</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          
-          {fabOpen && (
-            <View style={styles.fabBackdrop}>
-              <TouchableOpacity 
-                style={{width: '100%', height: '100%'}}
-                onPress={() => setFabOpen(false)}
-              />
-            </View>
-          )}
-        </>
-      )}
+
+      {/* --- Restore FAB Group from .old.home (Adapted Actions) --- */}
+      <Portal>
+          <FAB.Group
+             open={fabOpen}
+             visible={isHomeTab} // Only show on home tab
+             icon={fabOpen ? 'close' : 'plus'}
+             actions={[
+               { icon: 'microphone', label: 'Record', onPress: () => router.push('/(tabs)/record'), size: 'small' },
+               { icon: 'bell-plus-outline', label: 'Add Reminder', onPress: () => router.push('/(tabs)/add'), size: 'small' },
+               { icon: 'file-plus-outline', label: 'Add Document', onPress: showAddDocumentModal, size: 'small' },
+             ]}
+             onStateChange={({ open }) => setFabOpen(open)}
+             onPress={() => { /* No action needed on main FAB press */ }}
+             style={styles.fabGroupStyle} // Use specific style name
+             fabStyle={styles.fabStyle} // Use specific style name
+           />
+      </Portal>
+      {/* --- End Restore FAB Group --- */}
+
     </SafeAreaView>
   );
 }
 
+// Helper function to capitalize (if not imported from elsewhere)
+const capitalizeFirstLetter = (str: string): string => {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
 // Define the styles factory function outside the component
-const createStyles = (theme: MD3Theme) => StyleSheet.create({
+// Merge styles from .old.home and previous steps
+const createStyles = (theme: MD3Theme, tabBarHeight: number) => StyleSheet.create({
   container: {
     flex: 1,
   },
+  // Use scrollContent padding from .old.home
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingBottom: 80 + 16 + 30,
+    paddingBottom: tabBarHeight + 100, // Ensure enough space below content for FAB
   },
+  // Use header styles from .old.home
   headerContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -515,7 +500,8 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   },
   appTitle: {
     fontWeight: '600',
-    color: '#111827',
+    color: '#111827', // Consider using theme.colors.onBackground
+    fontSize: 20, // Match old style
   },
   avatarButton: {
     borderRadius: 20,
@@ -523,14 +509,16 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   avatar: {
     backgroundColor: theme.colors.primaryContainer,
   },
+  // Use greeting styles from .old.home
   greetingContainer: {
     marginBottom: 16,
   },
   greetingText: {
     fontSize: 20,
     fontWeight: '500',
-    color: '#111827',
+    color: '#111827', // Consider using theme.colors.onBackground
   },
+  // Use progress styles from .old.home
   progressContainer: {
     marginBottom: 24,
   },
@@ -541,19 +529,20 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   },
   progressLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#6B7280', // Consider theme.colors.onSurfaceVariant
   },
   progressBarBackground: {
     height: 8,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#E5E7EB', // Consider theme.colors.surfaceVariant or outline
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#4F46E5',
+    backgroundColor: '#4F46E5', // Consider theme.colors.primary
     borderRadius: 4,
   },
+  // Use section styles from .old.home
   section: {
     marginBottom: 32,
   },
@@ -566,12 +555,14 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#111827',
+    color: '#111827', // Consider theme.colors.onBackground
   },
+  // Use date style from .old.home
   date: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#6B7280', // Consider theme.colors.onSurfaceVariant
   },
+  // Use reminder container styles from .old.home
   remindersContainer: {
     borderWidth: 1,
     borderColor: theme.colors.outlineVariant,
@@ -587,8 +578,10 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     gap: 12,
     paddingBottom: 4,
   },
+  // Use empty reminder styles from .old.home
   emptyRemindersContainer: {
-    height: '100%',
+    height: '100%', // Fill the container
+    minHeight: 150, // Ensure it's not too small
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -597,10 +590,12 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     fontSize: 16,
     color: theme.colors.onSurfaceVariant,
     marginBottom: 16,
+    textAlign: 'center',
   },
   addReminderButton: {
     borderRadius: 8,
   },
+  // Use quick actions styles from .old.home
   quickActionsGrid: {
     gap: 16,
   },
@@ -608,142 +603,74 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
   },
-  modifyModalContainer: {
-    padding: 24,
-    margin: 20,
-    borderRadius: 16,
-  },
-  modifyModalTitle: {
-    textAlign: 'center',
-    marginBottom: 8,
-    fontWeight: 'bold',
-  },
-  modifyModalSubTitle: {
-    textAlign: 'center',
-    marginBottom: 20,
-    color: theme.colors.onSurfaceVariant,
-  },
-  datePickerButton: {
-    borderWidth: 1.5,
-    borderColor: theme.colors.outline,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    marginBottom: 20,
-    backgroundColor: theme.colors.surface,
-  },
-  datePickerButtonText: {
-    fontSize: 16,
-    color: theme.colors.onSurface,
-  },
-  modifyInput: {
-    marginBottom: 20,
-    backgroundColor: theme.colors.surface,
-  },
-  modifyModalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  modifyModalButton: {
-    // Add specific styling if needed
-  },
-  fabContainer: {
+   // Error container styles (keep from previous step)
+   errorContainer: {
+     alignItems: 'center',
+     marginHorizontal: 20,
+     marginTop: 30,
+     padding: 20,
+     backgroundColor: theme.colors.errorContainer,
+     borderRadius: theme.roundness,
+   },
+   errorText: {
+     color: theme.colors.onErrorContainer,
+     marginBottom: 15,
+     textAlign: 'center',
+   },
+
+   // Styles for the simplified modification modal (from .old.home)
+   modifyModalContainerStyle: { // Use distinct name
+     padding: 24,
+     margin: 20,
+     borderRadius: 16,
+   },
+   modifyModalTitle: {
+     textAlign: 'center',
+     marginBottom: 8,
+     fontWeight: 'bold',
+   },
+   modifyModalSubTitle: {
+     textAlign: 'center',
+     marginBottom: 20,
+     color: theme.colors.onSurfaceVariant,
+   },
+   datePickerButton: { // For the touchable opacity triggering the date picker
+     borderWidth: 1.5,
+     borderColor: theme.colors.outline,
+     borderRadius: 12,
+     paddingVertical: 16,
+     paddingHorizontal: 12,
+     marginBottom: 20,
+     backgroundColor: theme.colors.surface, // Ensure contrast
+   },
+   datePickerButtonText: {
+     fontSize: 16,
+     color: theme.colors.onSurface, // Ensure contrast
+     textAlign: 'center',
+   },
+   modifyInput: {
+     marginBottom: 20,
+     backgroundColor: theme.colors.surface, // Ensure contrast
+   },
+   modifyModalActions: {
+     flexDirection: 'row',
+     justifyContent: 'flex-end',
+     gap: 8,
+   },
+   modifyModalButton: {
+     // Style if needed
+   },
+
+  // FAB Group styles based on .old.home
+  fabGroupStyle: { // Style for the FAB.Group container
     position: 'absolute',
-    right: 24,
-    zIndex: 3,
-  },
-  fab: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 28,
-  },
-  fabMenu: {
-    position: 'absolute',
-    right: 24,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 12,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    zIndex: 2,
-  },
-  fabMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-  },
-  fabMenuItemIcon: {
-    marginRight: 12,
-  },
-  fabMenuItemText: {
-    fontSize: 16,
-    color: theme.colors.onSurface,
-  },
-  fabBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
+    margin: 16,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 1,
+    paddingBottom: tabBarHeight, // Dynamic padding
   },
-  modalContainer: {
-    padding: 24,
-    margin: 20,
-    borderRadius: 16,
+  fabStyle: { // Style for the main FAB itself
+    backgroundColor: '#4F46E5', // Use color from old style or theme.colors.primary
+    borderRadius: 28,
   },
-  modalTitle: {
-    textAlign: 'center',
-    marginBottom: 8,
-    fontWeight: 'bold',
-  },
-  modalSubtitle: {
-    textAlign: 'center',
-    marginBottom: 20,
-    color: theme.colors.onSurfaceVariant,
-  },
-  modalOptionsContainer: {
-    gap: 16,
-    marginBottom: 24,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: theme.colors.surfaceVariant,
-    borderRadius: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  modalOptionIconContainer: {
-    width: 48, 
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: theme.colors.primaryContainer,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  modalOptionContent: {
-    flex: 1,
-  },
-  modalOptionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  modalOptionDescription: {
-    fontSize: 14,
-    color: theme.colors.onSurfaceVariant,
-  },
-  modalCancelButton: {
-    marginTop: 8,
-  },
-}); 
+});

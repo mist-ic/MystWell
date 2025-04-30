@@ -883,8 +883,32 @@ function RecordScreenContent() {
           await recordingInstance.stopAndUnloadAsync();
           // No need to set to null here, setRecordingInstance will overwrite
       }
+      // Configure audio recording settings for Android and iOS
+      const recordingOptions: Audio.RecordingOptions = {
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY, // Start with a preset and override
+        android: {
+          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.android,
+          extension: '.wav', // Use WAV format
+          outputFormat: Audio.AndroidOutputFormat.DEFAULT, // Let expo handle based on extension
+          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT, // Let expo handle based on extension
+          sampleRate: 16000, // Standard speech recognition rate
+          numberOfChannels: 1,
+        },
+        ios: {
+          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+          extension: '.wav', // Use WAV on iOS too (LINEAR16)
+          sampleRate: 16000,
+          numberOfChannels: 1,
+        },
+        web: {
+          // Web might need different handling if you support it
+          // mimeType: 'audio/wav',
+          // bitsPerSecond: 128000,
+          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.web, // Keep web defaults or adjust as needed
+        }
+      };
       const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY, // Or use specific options if needed
+        recordingOptions,
         (status) => {
           // Update audio level for visualization (optional)
           if (status.isRecording) {
