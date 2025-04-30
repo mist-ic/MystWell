@@ -1,0 +1,61 @@
+name: Deploy Android to Closed Beta
+
+on:
+  workflow_dispatch: # Allows manual triggering
+  # push:
+  #   branches:
+  #     - main # Example: Trigger on push to main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18 # Use LTS or your project's required version
+
+      # Change working directory if your project is not at the root
+      - name: Change working directory
+        run: cd Frontend
+
+      - name: Install dependencies
+        # Use npm ci for faster, more reliable installs in CI
+        # Or use yarn install --frozen-lockfile if you use Yarn
+        run: npm ci
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Create Google Service Account key file
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > ./REDACTED_SERVICE_ACCOUNT
+        # Ensure this path matches the one used in eas submit
+
+      - name: Build Android App Bundle (AAB)
+        # Use --non-interactive for CI environments
+        # Use --profile production (assuming you have this profile in eas.json)
+        # Outputting build details to a file can be useful
+        run: eas build --platform android --profile production --non-interactive --json --output=./build-output.json
+
+      # Optional: Parse build artifact URL if needed for other steps
+      # - name: Get build artifact URL
+      #   id: build_artifact
+      #   run: echo "artifact_url=$(jq -r '.artifacts.buildUrl' build-output.json)" >> $GITHUB_OUTPUT
+
+      - name: Submit to Google Play (Closed Beta)
+        # Use --latest to submit the build created in the previous step
+        # Specify the track (e.g., 'beta', 'internal', 'closedBeta' - ensure this matches your Play Console track name)
+        # Use --type aab if you built an AAB
+        run: |
+          eas submit --platform android \
+            --latest \
+            --type aab \
+            --track closedBeta \
+            --service-account-key-path ./REDACTED_SERVICE_ACCOUNT \
+            --non-interactive 

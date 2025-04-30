@@ -14,14 +14,22 @@
   "jest": {
     "preset": "jest-expo"
   },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": ["react-native-document-scanner-plugin"],
+        "listUnknownPackages": false
+      }
+    }
+  },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.3.0",
     "@expo/vector-icons": "^14.1.0",
-    "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/datetimepicker": "8.2.0",
-    "@react-navigation/bottom-tabs": "^7.3.10",
+    "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/elements": "^2.3.8",
-    "@react-navigation/native": "^7.1.6",
+    "@react-navigation/native": "^7.0.14",
     "@rneui/base": "^4.0.0-rc.7",
     "@rneui/themed": "^4.0.0-rc.8",
     "@supabase/supabase-js": "^2.49.4",
@@ -34,7 +42,7 @@
     "expo-constants": "~17.0.8",
     "expo-dev-client": "~5.0.19",
     "expo-device": "^7.0.3",
-    "expo-document-picker": "^13.1.4",
+    "expo-document-picker": "~13.0.3",
     "expo-file-system": "^18.0.12",
     "expo-font": "~13.0.4",
     "expo-haptics": "~14.0.1",

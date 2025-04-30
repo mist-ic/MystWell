@@ -43,3 +43,7 @@ app-example
 
 # Backend Environment Variables
 **/.env
+
+# Add ignored native directories
+/android
+/ios

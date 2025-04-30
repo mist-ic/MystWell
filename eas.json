@@ -12,10 +12,22 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "REDACTED_API_URL",
+        "EXPO_PUBLIC_SUPABASE_URL": "REDACTED_SUPABASE_URL",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "REDACTED_SUPABASE_ANON_KEY"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./REDACTED_SERVICE_ACCOUNT"
+      }
+    }
   }
 }
