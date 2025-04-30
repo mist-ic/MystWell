@@ -53,8 +53,7 @@ jobs:
           mkdir -p deploy
           cp -r dist deploy/
           cp package.json package-lock.json deploy/
-          zip -r ../release.zip . # Zip contents of deploy folder
-        working-directory: ./deploy # Run commands within deploy dir
+          (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
