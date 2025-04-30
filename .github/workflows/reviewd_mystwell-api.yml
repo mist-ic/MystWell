@@ -68,11 +68,17 @@ jobs:
           # cp .env.production artifact/
           # cp -r public artifact/  (if you have static assets)
 
-      # Step 7: List artifact contents for verification
+      # Step 7: Install production dependencies in artifact directory
+      - name: Install production dependencies
+        run: |
+          cd artifact
+          npm ci --only=production
+          
+      # Step 8: List artifact contents for verification
       - name: List artifact directory contents
         run: ls -la artifact/
 
-      # Step 8: Zip the prepared artifact directory
+      # Step 9: Zip the prepared artifact directory
       - name: Zip artifact directory for deployment
         run: |
           cd artifact
