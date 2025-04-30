@@ -26,22 +26,22 @@ const mockDeleteInner = jest.fn(); // Mock the final execution of delete
 const mockSupabaseClient = {
   // from() returns an object with chainable methods
   from: jest.fn(() => ({
-    select: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  insert: jest.fn().mockReturnThis(),
+  update: jest.fn().mockReturnThis(),
     // delete() returns an object that allows eq() and then resolves with mockDeleteInner
-    delete: jest.fn(() => ({
+  delete: jest.fn(() => ({
       eq: jest.fn().mockReturnThis(),
       // The actual promise resolution for delete:
       then: (resolve: (value: any) => void, reject: (reason?: any) => void) => {
         mockDeleteInner().then(resolve, reject);
       }
-    })),
-    eq: jest.fn().mockReturnThis(),
-    order: jest.fn().mockReturnThis(),
+  })),
+  eq: jest.fn().mockReturnThis(),
+  order: jest.fn().mockReturnThis(),
     // Terminal methods return the result of the core mocks
-    maybeSingle: mockMaybeSingle,
-    single: mockSingle,
+  maybeSingle: mockMaybeSingle,
+  single: mockSingle,
     // General promise resolution (for select etc.) uses mockSelect
     then: (resolve: (value: any) => void, reject: (reason?: any) => void) => {
         mockSelect().then(resolve, reject);
@@ -108,7 +108,7 @@ describe('RemindersService', () => {
     mockSingle.mockResolvedValue(mockSuccess(mockReminder));
     mockMaybeSingle.mockResolvedValue(mockSuccess(mockReminder));
     mockSelect.mockResolvedValue(mockSuccess([mockReminder]));
-    mockDeleteInner.mockResolvedValue(mockSuccess(null)); 
+    mockDeleteInner.mockResolvedValue(mockSuccess(null));
   });
 
   it('should be defined', () => {
