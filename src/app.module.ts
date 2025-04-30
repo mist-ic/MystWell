@@ -13,6 +13,7 @@ import { DocumentModule } from './document/document.module';
 import { ChatModule } from './chat/chat.module';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { APP_GUARD } from '@nestjs/core';
     ProfileModule,
     DocumentModule,
     ChatModule,
+    RemindersModule,
   ],
   controllers: [AppController],
   providers: [

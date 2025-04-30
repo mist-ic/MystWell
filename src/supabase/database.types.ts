@@ -88,6 +88,7 @@ export type Database = {
           created_at: string
           detected_document_type: string | null
           display_name: string | null
+          embedding: string | null
           error_message: string | null
           id: string
           profile_id: string
@@ -100,6 +101,7 @@ export type Database = {
           created_at?: string
           detected_document_type?: string | null
           display_name?: string | null
+          embedding?: string | null
           error_message?: string | null
           id?: string
           profile_id: string
@@ -112,6 +114,7 @@ export type Database = {
           created_at?: string
           detected_document_type?: string | null
           display_name?: string | null
+          embedding?: string | null
           error_message?: string | null
           id?: string
           profile_id?: string
@@ -481,6 +484,62 @@ export type Database = {
           },
         ]
       }
+      reminders: {
+        Row: {
+          created_at: string
+          days_of_week: number[] | null
+          end_date: string | null
+          frequency_type: string
+          id: string
+          interval_days: number | null
+          is_active: boolean
+          notes: string | null
+          profile_id: string
+          start_date: string
+          times_of_day: string[]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          days_of_week?: number[] | null
+          end_date?: string | null
+          frequency_type: string
+          id?: string
+          interval_days?: number | null
+          is_active?: boolean
+          notes?: string | null
+          profile_id: string
+          start_date?: string
+          times_of_day: string[]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          days_of_week?: number[] | null
+          end_date?: string | null
+          frequency_type?: string
+          id?: string
+          interval_days?: number | null
+          is_active?: boolean
+          notes?: string | null
+          profile_id?: string
+          start_date?: string
+          times_of_day?: string[]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reminders_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -549,6 +608,19 @@ export type Database = {
       l2_normalize: {
         Args: { "": string } | { "": unknown } | { "": unknown }
         Returns: unknown
+      }
+      match_documents: {
+        Args: {
+          query_embedding: string
+          query_profile_id: string
+          match_threshold: number
+          match_count: number
+        }
+        Returns: {
+          id: string
+          header_description: string
+          similarity: number
+        }[]
       }
       requesting_profile_id: {
         Args: Record<PropertyKey, never>
@@ -716,5 +788,3 @@ export const Constants = {
     },
   },
 } as const
-
-export {}; 
