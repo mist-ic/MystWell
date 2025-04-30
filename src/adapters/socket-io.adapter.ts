@@ -8,9 +8,7 @@ export class SocketIoAdapter extends IoAdapter {
   }
 
   createIOServer(port: number, options?: any): Server {
-    const configService = this.app.get('ConfigService'); // Get ConfigService if needed for origins
-    
-    // Define allowed origins directly or fetch from ConfigService
+    // Define allowed origins directly without trying to access ConfigService
     const allowedOrigins = [
         'https://mystwell.me',
         'https://www.mystwell.me',
@@ -20,21 +18,14 @@ export class SocketIoAdapter extends IoAdapter {
         'http://localhost:19006',
         'exp://*',
         'capacitor://*'
-    ]; // Should match main.ts
-
-    // Ensure path is explicitly defined, defaulting to standard socket.io path
-    const path = options?.path || '/socket.io';
-    // Ensure serveClient is explicitly defined, defaulting to true
-    const serveClient = options?.serveClient === undefined ? true : options.serveClient;
+    ];
 
     // Create options with CORS configuration
     const corsOptions = {
       ...options,
-      path: path, // Explicitly include path
-      serveClient: serveClient, // Explicitly include serveClient
       cors: {
         origin: allowedOrigins,
-        methods: ['GET', 'POST'], // Standard methods for Socket.IO handshake
+        methods: ['GET', 'POST'],
         credentials: true,
       },
     };
