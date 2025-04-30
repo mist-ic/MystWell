@@ -158,20 +158,7 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
             generationConfig: { responseMimeType: "application/json" },
         });
 
-        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information.
-Please fill in the data fields with the actual information from the document. 
-DO NOT return the schema definition - only return actual data values extracted from the document.
-Respond ONLY with a JSON object containing the extracted information. Do NOT include backticks or any other text.
-
-For example, your response should be of the form:
-{
-  "headerDescription": "This is a lab report for patient...",
-  "detected_document_type": "Lab Report",
-  "patient_name": "John Doe",
-  ...
-}
-
-Document Analysis:`;
+        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information according to the following structure:\n\nStructure:\n{\n  \"headerDescription\": \"<Detailed summary including patient name, doc type, date, provider, key findings>\",\n  \"detected_document_type\": \"<Prescription | Lab Report | Doctor Note | Invoice | Other>\",\n  \"patient_name\": \"<Full Patient Name>\",\n  \"date_of_service\": \"<YYYY-MM-DD>\",\n  \"provider_name\": \"<Doctor/Clinic/Lab Name>\",\n  \"key_information\": [\"<Finding 1>\", \"<Finding 2>\"],\n  \"medications_mentioned\": [{\"name\": \"<Med Name>\", \"dosage\": \"<Dosage>\", \"frequency\": \"<Frequency>\"}],\n  \"follow_up_instructions\": \"<Follow-up details>\",\n  \"summary\": \"<Brief summary>\"\n}\n\nInstructions:\n1.  Extract the information from the document and populate the fields in the structure above.\n2.  Respond ONLY with the populated JSON object containing the extracted data.\n3.  DO NOT include the structure definition, markdown formatting (like \\\`\\\`\\\`json), or any other text outside the JSON object itself.\n4.  If information for a field is not found, use null or an empty string/array as appropriate for the field type.\n5.  Ensure the output is a single, valid JSON object.\n\nDocument Analysis:`;
         const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
         
         const parts = [ { text: prompt }, filePart ];
