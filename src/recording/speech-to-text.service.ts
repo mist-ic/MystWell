@@ -58,7 +58,7 @@ export class SpeechToTextService {
         // Specify model and language explicitly
         model: 'chirp_2',
         // Use languageCodes (plural array) as expected by V2 config type
-        languageCodes: ["en-US"],
+        languageCodes: "en-US",
         // Use auto decoding to handle different client formats (WAV, WEBM)
         autoDecodingConfig: {},
         // Specify required features
