@@ -63,26 +63,20 @@ export class SpeechToTextService {
     // This avoids TypeScript errors while still providing the correct structure for the API
     const request = {
       recognizer: recognizerName,
-      config: {
-        autoDecodingConfig: {}, // Let Google auto-detect the encoding
-        // explicitDecodingConfig: {
-        //   encoding: 'LINEAR16', // Most common for WAV files
-        //   sampleRateHertz: 16000, // Optimal for human speech (reduced from 44100)
-        //   audioChannelCount: 1, // Mono is perfect for voice
-        // },
-        // Speech-specific optimizations
-        features: {
-          enableAutomaticPunctuation: false,  // Set to false per recognizer config
-          enableSpokenPunctuation: false,     // Set to false per recognizer config
-          enableWordConfidence: true,         // Set to true per recognizer config
-          profanityFilter: false,             // Matches recognizer config
-        },
-        // Remove model specification to use the recognizer's configuration
-        languageCode: "en-US",                // Using single language code format for V2 API
-        adaptation: {
-          phraseSetReferences: [],            // Can be used later for custom vocabulary
-        },
-      },
+      // Remove the entire config block to rely solely on the recognizer's settings
+      // config: {
+      //   autoDecodingConfig: {}, 
+      //   features: {
+      //     enableAutomaticPunctuation: false, 
+      //     enableSpokenPunctuation: false,    
+      //     enableWordConfidence: true,        
+      //     profanityFilter: false,            
+      //   },
+      //   languageCode: "en-US",                
+      //   adaptation: {
+      //     phraseSetReferences: [],            
+      //   },
+      // },
       audio: {
         content: audioBytes.toString('base64')
       },
