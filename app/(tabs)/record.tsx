@@ -844,15 +844,18 @@ function RecordScreenContent() {
     setIsLoading(true);
     setError(null);
     activeUploadInfo.current = null; // Reset active upload info
-
+    
     try {
-      // 1. Request microphone permissions
-      console.log('Requesting permissions...');
-      const permissionResponse = await Audio.requestPermissionsAsync();
-      if (!permissionResponse.granted) {
-        throw new Error('Microphone permissions were denied.');
+      // 1. Check Permissions
+      console.log('Requesting audio recording permissions...');
+      const { status: audioStatus } = await Audio.requestPermissionsAsync();
+      
+      if (audioStatus !== 'granted') {
+        setError('Audio recording permission is required.');
+        return;
       }
-      console.log('Web microphone permission granted.');
+      
+      console.log('Audio permissions granted.');
 
       // 2. Get upload URL from backend
       console.log('Requesting upload URL...');
@@ -887,19 +890,19 @@ function RecordScreenContent() {
       const recordingOptions: Audio.RecordingOptions = {
         android: {
           extension: '.wav',
-          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 16000 * 16 * 1,
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
         },
         ios: {
-          extension: '.wav',
-          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+          extension: '.m4a',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
           audioQuality: Audio.IOSAudioQuality.MAX,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 16000 * 16 * 1,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
           linearPCMBitDepth: 16,
           linearPCMIsBigEndian: false,
           linearPCMIsFloat: false,
@@ -984,10 +987,20 @@ function RecordScreenContent() {
       // Upload the blob to the signed URL (use the stored URL)
       console.log('Uploading to signed URL...');
       setUploadProgress(0);
-      const uploadResponseS3 = await fetch(uploadUrl, { // <-- Use stored uploadUrl
+      
+      // Determine the correct content type based on platform
+      const contentType = Platform.select({
+        android: 'audio/mp4',
+        ios: 'audio/mp4',
+        web: blob.type || 'audio/webm',
+        default: 'audio/mpeg',
+      });
+      
+      console.log(`Using content type: ${contentType} for upload`);
+      
+      const uploadResponseS3 = await fetch(uploadUrl, {
         method: 'PUT',
-        // Use the correct content type based on the recording options
-        headers: { 'Content-Type': (Platform.OS === 'android' || Platform.OS === 'ios') ? 'audio/wav' : (blob.type || 'audio/m4a') },
+        headers: { 'Content-Type': contentType },
         body: blob,
       });
 
