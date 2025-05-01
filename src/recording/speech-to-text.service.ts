@@ -84,7 +84,9 @@ export class SpeechToTextService {
           phraseSetReferences: [],            // Can be used later for custom vocabulary
         },
       },
-      content: audioBytes,
+      audio: {
+        content: audioBytes.toString('base64')
+      },
     } as any; // Use type assertion to bypass TypeScript checking
 
     try {
