@@ -58,7 +58,7 @@ export class SpeechToTextService {
         // Specify model and language explicitly
         model: 'chirp_2',
         // Use languageCodes (plural array) as expected by V2 config type
-        languageCodes: "en-US",
+        languageCodes: ["en-US"],
         // Use auto decoding to handle different client formats (WAV, WEBM)
         autoDecodingConfig: {},
         // Specify required features
@@ -76,8 +76,9 @@ export class SpeechToTextService {
     };
 
     try {
-      // Log the relevant parts of the config being used
-      this.logger.debug(`Sending V2 transcription request with model: ${request.config?.model}, language: ${request.config?.languageCodes?.join(', ')}, autoDecoding: true ...`);
+      // Log the relevant parts of the config being used - safely access the first language code
+      const langCodeForLog = Array.isArray(request.config?.languageCodes) ? request.config.languageCodes[0] : 'unknown';
+      this.logger.debug(`Sending V2 transcription request with model: ${request.config?.model}, language: ${langCodeForLog}, autoDecoding: true ...`);
 
       // Still cast response to V2 type
       const [response] = await this.speechClient.recognize(request) as [RecognizeResponseV2, any, any];
