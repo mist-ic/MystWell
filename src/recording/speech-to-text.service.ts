@@ -80,6 +80,7 @@ export class SpeechToTextService {
         // Optimize for human conversation
         useEnhanced: true,                    // Use enhanced models if available
         model: 'chirp_2',                     // Using the Chirp-2 model as configured
+        languageCodes: ["en-US"],             // Added language code - required for V2 API
         adaptation: {
           phraseSetReferences: [],            // Can be used later for custom vocabulary
         },
