@@ -890,25 +890,25 @@ function RecordScreenContent() {
       const recordingOptions: Audio.RecordingOptions = {
         android: {
           extension: '.wav',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
+          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+          sampleRate: 16000,
+          numberOfChannels: 1,
           bitRate: 128000,
         },
         ios: {
-          extension: '.m4a',
-          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          extension: '.wav',
+          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
           audioQuality: Audio.IOSAudioQuality.MAX,
-          sampleRate: 44100,
-          numberOfChannels: 2,
+          sampleRate: 16000,
+          numberOfChannels: 1,
           bitRate: 128000,
           linearPCMBitDepth: 16,
           linearPCMIsBigEndian: false,
           linearPCMIsFloat: false,
         },
         web: {
-          mimeType: 'audio/webm',
+          mimeType: 'audio/wav',
           bitsPerSecond: 128000,
         }
       };
@@ -990,10 +990,10 @@ function RecordScreenContent() {
       
       // Determine the correct content type based on platform
       const contentType = Platform.select({
-        android: 'audio/mp4',
-        ios: 'audio/mp4',
-        web: blob.type || 'audio/webm',
-        default: 'audio/mpeg',
+        android: 'audio/wav',
+        ios: 'audio/wav',
+        web: blob.type || 'audio/wav',
+        default: 'audio/wav',
       });
       
       console.log(`Using content type: ${contentType} for upload`);
