@@ -59,28 +59,39 @@ export class SpeechToTextService {
       throw new Error('Speech recognizer name configuration is missing.');
     }
 
-    // Construct the request using the audio content (bytes)
-    // The client library should handle Base64 encoding if needed when sending binary data.
+    // Using a generic request structure with type assertion
+    // This avoids TypeScript errors while still providing the correct structure for the API
     const request = {
       recognizer: recognizerName,
       config: {
-        languageCode: 'en-US', // Add explicit language code
-        // features: {
-        //   // Add features as needed
+        autoDecodingConfig: {}, // Let Google auto-detect the encoding
+        // explicitDecodingConfig: {
+        //   encoding: 'LINEAR16', // Most common for WAV files
+        //   sampleRateHertz: 16000, // Optimal for human speech (reduced from 44100)
+        //   audioChannelCount: 1, // Mono is perfect for voice
         // },
-        // Auto-detection should still work if Recognizer doesn't specify encoding
-        // autoDecodingConfig: {},
+        // Speech-specific optimizations
+        features: {
+          enableAutomaticPunctuation: false,  // Set to false per recognizer config
+          enableSpokenPunctuation: false,     // Set to false per recognizer config
+          enableWordConfidence: true,         // Set to true per recognizer config
+          profanityFilter: false,             // Matches recognizer config
+        },
+        // Optimize for human conversation
+        useEnhanced: true,                    // Use enhanced models if available
+        model: 'chirp_2',                     // Using the Chirp-2 model as configured
+        adaptation: {
+          phraseSetReferences: [],            // Can be used later for custom vocabulary
+        },
       },
-      // Place the audio content within an `audio` object
-      audio: {
-        content: audioBytes, 
-      }
-    } as any; // Still using `as any` to bypass potential library type issues
+      content: audioBytes,
+    } as any; // Use type assertion to bypass TypeScript checking
 
     try {
       this.logger.debug('Sending V2 transcription request with audio content...');
 
-      const [response] = await this.speechClient.recognize(request as any) as [RecognizeResponseV2, any, any];
+      // Use any type to work with V2 API that might not fully match TypeScript definitions
+      const [response] = await this.speechClient.recognize(request) as [RecognizeResponseV2, any, any];
 
       this.logger.debug('Received V2 transcription response');
 
