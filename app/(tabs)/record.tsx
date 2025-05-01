@@ -889,8 +889,8 @@ function RecordScreenContent() {
       // Define recording options for all platforms to avoid the error
       const recordingOptions: Audio.RecordingOptions = {
         android: {
-          extension: '.wav',
-          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
           audioEncoder: Audio.AndroidAudioEncoder.AAC,
           sampleRate: 16000,
           numberOfChannels: 1,
@@ -990,7 +990,7 @@ function RecordScreenContent() {
       
       // Determine the correct content type based on platform
       const contentType = Platform.select({
-        android: 'audio/wav',
+        android: 'audio/mp4',
         ios: 'audio/wav',
         web: blob.type || 'audio/webm',
         default: 'audio/wav',
