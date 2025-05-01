@@ -63,10 +63,10 @@ export class SpeechToTextService {
     const request = {
       // recognizer: recognizerName, // Remove recognizer field
       config: { 
-        // Use explicitDecodingConfig based on updated recognizer
+        // Use explicitDecodingConfig matching M4A_AAC settings
         explicitDecodingConfig: {
-          encoding: 'LINEAR16',
-          sampleRateHertz: 8000,
+          encoding: 'M4A_AAC', // Expect M4A container with AAC codec
+          sampleRateHertz: 16000, // Expect 16kHz
           audioChannelCount: 1,
         },
         // Keep features and language code specified inline
