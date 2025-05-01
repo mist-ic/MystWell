@@ -695,7 +695,7 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
     
     return (
       <View>
-        <Card style={[styles.documentCard, { elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+        <Card style={[styles.documentCard, { elevation: 2, boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)' }]}>
           <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 3 }]}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Document Overview</Text>
@@ -779,7 +779,7 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
     
     return (
       <View>
-        <Card style={[styles.documentCard, { elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+        <Card style={[styles.documentCard, { elevation: 2, boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)' }]}>
           <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 3 }]}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>Key Information</Text>
@@ -858,7 +858,7 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
         </Card>
         
         {data.medications_mentioned && (
-          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)' }]}>
             <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 2 }]}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Medications Mentioned</Text>
@@ -873,7 +873,7 @@ export function DocumentDetails({ document, onBack, onRefresh }: DocumentDetails
         )}
         
         {data.follow_up_instructions && (
-          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, shadowOpacity: 0.1, shadowRadius: 4 }]}>
+          <Card style={[styles.documentCard, { marginTop: BASE_GRID * 2, elevation: 2, boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)' }]}>
             <Card.Content style={[styles.cardContent, { paddingVertical: BASE_GRID * 2 }]}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>Follow Up Instructions</Text>

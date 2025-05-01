@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '../context/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppState, Alert, Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
+import { useAppState } from '../context/AppStateContext';
 
 // Structure for a Chat Session (matching backend)
 export interface ChatSession {
@@ -42,6 +43,7 @@ const LAST_ACTIVE_SESSION_KEY = 'lastActiveSessionId';
 
 export const useChatWebSocket = () => {
   const { session, profile } = useAuth(); // Assuming profile is also available in AuthContext
+  const { isActive, currentState } = useAppState(); // Use the AppState context
   
   // State for multiple sessions
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -55,7 +57,6 @@ export const useChatWebSocket = () => {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false); // Separate loading for history
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const appState = useRef(AppState.currentState);
 
   const getHistoryStorageKey = (sessionId: string | null) => sessionId ? `${CHAT_HISTORY_STORAGE_KEY_PREFIX}${sessionId}` : null;
 
@@ -338,27 +339,6 @@ export const useChatWebSocket = () => {
         // setIsLoadingHistory(false);
     });
 
-    // --- App State Handling --- 
-    const subscription = AppState.addEventListener('change', nextAppState => {
-        if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-            console.log('App has come to the foreground!');
-            // Reconnect if disconnected when coming to foreground
-            if (!socketRef.current?.connected && session?.access_token) {
-                console.log('Attempting to reconnect socket...');
-                socketRef.current?.connect();
-                
-                // After reconnection, request sessions list again to ensure we're up to date
-                socketRef.current?.emit('listSessions');
-            }
-        }
-        if (nextAppState.match(/inactive|background/)){
-            console.log('App has gone to the background!');
-            // Don't disconnect on background - this prevents reconnection issues on web
-            // socketRef.current?.disconnect(); 
-        }
-        appState.current = nextAppState;
-    });
-
     // --- Cleanup --- 
     return () => {
       console.log('useChatWebSocket: Cleaning up WebSocket connection.');
@@ -382,10 +362,46 @@ export const useChatWebSocket = () => {
       }
       
       socketRef.current = null;
-      subscription.remove();
     };
-  // Rerun effect if session or profile ID changes - removing activeSessionId to prevent unnecessary reconnects
-  }, [session, profile?.id, loadHistory, saveHistory, switchActiveSession]); 
+  // Include isActive in dependencies to reconnect when the app becomes active
+  }, [session, profile?.id, loadHistory, saveHistory, switchActiveSession, isActive]); 
+
+  // Separate effect to handle app state changes
+  useEffect(() => {
+    // Only run this effect when session and profile exist
+    if (!session?.access_token || !profile?.id) return;
+
+    if (isActive) {
+      console.log('useChatWebSocket: App is active, ensuring connection...');
+      // Always attempt reconnection when coming to foreground
+      if (!socketRef.current?.connected) {
+        console.log('Reconnecting socket on foreground...');
+        socketRef.current?.connect();
+      }
+        
+      // Force refresh state even if connected
+      setTimeout(() => {
+        if (socketRef.current?.connected) {
+          console.log('Refreshing sessions list on foreground...');
+          socketRef.current?.emit('listSessions');
+            
+          // If we have an active session, also refresh its history
+          if (activeSessionId) {
+            console.log('Refreshing active session history:', activeSessionId);
+            socketRef.current?.emit('getHistory', { sessionId: activeSessionId });
+          }
+        }
+      }, 500); // Short delay to ensure connection is stable
+    } else {
+      // App has gone to background
+      console.log('useChatWebSocket: App is in background...');
+      // For web specifically, ensure we don't lose connection
+      if (Platform.OS === 'web') {
+        // Keep connection alive but mark app state
+        socketRef.current?.emit('clientState', { state: 'background' });
+      }
+    }
+  }, [isActive, currentState, session, profile?.id, activeSessionId]);
 
   // --- Actions --- 
 

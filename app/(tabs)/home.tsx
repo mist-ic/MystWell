@@ -458,28 +458,29 @@ export default function HomeScreen() {
                  label: 'Record', 
                  onPress: () => router.push('/(tabs)/record'),
                  size: 'small',
-                 // Add style to prevent button nesting
-                 containerStyle: { pointerEvents: 'auto' }
+                 style: { pointerEvents: 'auto' }
                },
                { 
                  icon: 'bell-plus-outline', 
                  label: 'Add Reminder', 
                  onPress: () => router.push('/(tabs)/add'),
                  size: 'small',
-                 // Add style to prevent button nesting
-                 containerStyle: { pointerEvents: 'auto' }
+                 style: { pointerEvents: 'auto' }
                },
                { 
                  icon: 'file-plus-outline', 
                  label: 'Add Document', 
                  onPress: showAddDocumentModal,
                  size: 'small',
-                 // Add style to prevent button nesting
-                 containerStyle: { pointerEvents: 'auto' }
+                 style: { pointerEvents: 'auto' }
                },
              ]}
              onStateChange={({ open }) => setFabOpen(open)}
-             onPress={() => {}}
+             onPress={() => {
+               if (!fabOpen) {
+                 setFabOpen(true);
+               }
+             }}
              style={styles.fabGroupStyle} // Use specific style name
              fabStyle={styles.fabStyle} // Use specific style name
            />

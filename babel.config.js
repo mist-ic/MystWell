@@ -12,6 +12,20 @@ module.exports = function (api) {
           },
         },
       ],
+      [
+        'transform-remove-console',
+        {
+          exclude: ['error', 'warn', 'info', 'log'],
+        },
+      ],
     ],
+    env: {
+      production: {
+        plugins: [
+          'transform-remove-console',
+          'react-native-paper/babel',
+        ],
+      },
+    },
   };
 }; 

@@ -17,7 +17,9 @@
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
-        "exclude": ["react-native-document-scanner-plugin"],
+        "exclude": [
+          "react-native-document-scanner-plugin"
+        ],
         "listUnknownPackages": false
       }
     }
@@ -79,6 +81,7 @@
     "@types/react": "~18.3.12",
     "@types/react-test-renderer": "^18.3.1",
     "babel-plugin-module-resolver": "^5.0.2",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "jest": "^29.7.0",
     "jest-expo": "~52.0.6",
     "react-test-renderer": "18.3.1",

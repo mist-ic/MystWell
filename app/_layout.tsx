@@ -12,6 +12,7 @@ import { theme } from '@/theme';
 import { AuthProvider, useAuth } from '@/context/auth';
 import { SupabaseProvider } from '@/context/SupabaseProvider';
 import { DocumentModalProvider } from '@/context/DocumentModalContext';
+import { AppStateProvider } from '@/context/AppStateContext';
 
 // Import Inter fonts
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
@@ -89,13 +90,15 @@ export default function RootLayout() {
   return (
     <SupabaseProvider>
       <AuthProvider>
-        <DocumentModalProvider>
-          <PaperProvider theme={theme}>
-            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <InitialLayout />
-            </ThemeProvider>
-          </PaperProvider>
-        </DocumentModalProvider>
+        <AppStateProvider>
+          <DocumentModalProvider>
+            <PaperProvider theme={theme}>
+              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <InitialLayout />
+              </ThemeProvider>
+            </PaperProvider>
+          </DocumentModalProvider>
+        </AppStateProvider>
       </AuthProvider>
     </SupabaseProvider>
   );
