@@ -891,7 +891,7 @@ function RecordScreenContent() {
         android: {
           extension: '.wav',
           outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
           sampleRate: 16000,
           numberOfChannels: 1,
           bitRate: 128000,

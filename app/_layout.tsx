@@ -91,13 +91,13 @@ export default function RootLayout() {
     <SupabaseProvider>
       <AuthProvider>
         <AppStateProvider>
-          <DocumentModalProvider>
-            <PaperProvider theme={theme}>
-              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-                <InitialLayout />
-              </ThemeProvider>
-            </PaperProvider>
-          </DocumentModalProvider>
+        <DocumentModalProvider>
+          <PaperProvider theme={theme}>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <InitialLayout />
+            </ThemeProvider>
+          </PaperProvider>
+        </DocumentModalProvider>
         </AppStateProvider>
       </AuthProvider>
     </SupabaseProvider>
