@@ -202,7 +202,8 @@ export class RecordingService {
     try {
       const profileId = await this.getProfileIdFromUserId(userId);
       const recordingId = uuidv4();
-      const storagePath = `${profileId}/${recordingId}.m4a`;
+      // Use .mp4 extension which is compatible with both Android and iOS recordings
+      const storagePath = `${profileId}/${recordingId}.mp4`;
   
       // Provide default title and 0 duration when creating metadata
       const defaultTitle = `Recording - ${new Date().toLocaleString()}`;
