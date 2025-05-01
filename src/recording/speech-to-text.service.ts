@@ -78,7 +78,6 @@ export class SpeechToTextService {
           profanityFilter: false,             // Matches recognizer config
         },
         // Optimize for human conversation
-        useEnhanced: true,                    // Use enhanced models if available
         model: 'chirp_2',                     // Using the Chirp-2 model as configured
         languageCode: "en-US",                // Using single language code format for V2 API
         adaptation: {
