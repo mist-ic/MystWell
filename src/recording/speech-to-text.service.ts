@@ -77,8 +77,7 @@ export class SpeechToTextService {
           enableWordConfidence: true,         // Set to true per recognizer config
           profanityFilter: false,             // Matches recognizer config
         },
-        // Optimize for human conversation
-        model: 'latest_long',                     // Using the latest_long model as configured
+        // Remove model specification to use the recognizer's configuration
         languageCode: "en-US",                // Using single language code format for V2 API
         adaptation: {
           phraseSetReferences: [],            // Can be used later for custom vocabulary
