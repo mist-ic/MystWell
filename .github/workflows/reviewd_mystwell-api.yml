@@ -26,7 +26,7 @@ jobs:
         id: setup-node
         uses: actions/setup-node@v3
         with:
-          node-version: '22.x'
+          node-version: '20.x'
           cache: 'npm' # Use built-in npm caching
 
       # Cache both npm and node_modules for faster builds
@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p deploy
           cp -r dist deploy/
-          cp package.json package-lock.json deploy/
+          cp package.json package-lock.json .npmrc deploy/
           (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
