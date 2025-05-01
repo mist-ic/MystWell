@@ -908,7 +908,7 @@ function RecordScreenContent() {
           linearPCMIsFloat: false,
         },
         web: {
-          mimeType: 'audio/wav',
+          mimeType: 'audio/webm',
           bitsPerSecond: 128000,
         }
       };
@@ -992,7 +992,7 @@ function RecordScreenContent() {
       const contentType = Platform.select({
         android: 'audio/wav',
         ios: 'audio/wav',
-        web: blob.type || 'audio/wav',
+        web: blob.type || 'audio/webm',
         default: 'audio/wav',
       });
       
@@ -1465,6 +1465,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     boxShadow: '0px 2px 3.84px rgba(0, 0, 0, 0.25)',
     elevation: 5,
+    pointerEvents: 'auto'
   },
   listContentContainer: {
     paddingBottom: 80,

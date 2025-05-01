@@ -458,21 +458,21 @@ export default function HomeScreen() {
                  label: 'Record', 
                  onPress: () => router.push('/(tabs)/record'),
                  size: 'small',
-                 style: { pointerEvents: 'auto' }
+                 containerStyle: { pointerEvents: 'auto' }
                },
                { 
                  icon: 'bell-plus-outline', 
                  label: 'Add Reminder', 
                  onPress: () => router.push('/(tabs)/add'),
                  size: 'small',
-                 style: { pointerEvents: 'auto' }
+                 containerStyle: { pointerEvents: 'auto' }
                },
                { 
                  icon: 'file-plus-outline', 
                  label: 'Add Document', 
                  onPress: showAddDocumentModal,
                  size: 'small',
-                 style: { pointerEvents: 'auto' }
+                 containerStyle: { pointerEvents: 'auto' }
                },
              ]}
              onStateChange={({ open }) => setFabOpen(open)}
