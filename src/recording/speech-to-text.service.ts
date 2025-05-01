@@ -59,24 +59,28 @@ export class SpeechToTextService {
       throw new Error('Speech recognizer name configuration is missing.');
     }
 
-    // Using a generic request structure with type assertion
-    // This avoids TypeScript errors while still providing the correct structure for the API
+    // Using explicit config now, matching the updated recognizer settings
     const request = {
-      recognizer: recognizerName,
-      // Remove the entire config block to rely solely on the recognizer's settings
-      // config: {
-      //   autoDecodingConfig: {}, 
-      //   features: {
-      //     enableAutomaticPunctuation: false, 
-      //     enableSpokenPunctuation: false,    
-      //     enableWordConfidence: true,        
-      //     profanityFilter: false,            
-      //   },
-      //   languageCode: "en-US",                
-      //   adaptation: {
-      //     phraseSetReferences: [],            
-      //   },
-      // },
+      // recognizer: recognizerName, // Remove recognizer field
+      config: { 
+        // Use explicitDecodingConfig based on updated recognizer
+        explicitDecodingConfig: {
+          encoding: 'LINEAR16',
+          sampleRateHertz: 8000,
+          audioChannelCount: 1,
+        },
+        // Keep features and language code specified inline
+        features: {
+          enableAutomaticPunctuation: false,  // Matches recognizer setting
+          enableSpokenPunctuation: false,     // Matches recognizer setting
+          enableWordConfidence: true,         // Matches recognizer setting
+          profanityFilter: false,             // Matches recognizer setting
+        },
+        languageCode: "en-US",                // Specify language
+        // adaptation: {                      // No adaptation needed for now
+        //   phraseSetReferences: [],            
+        // },
+      },
       audio: {
         content: audioBytes.toString('base64')
       },
