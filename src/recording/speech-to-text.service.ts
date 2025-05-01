@@ -78,7 +78,7 @@ export class SpeechToTextService {
           profanityFilter: false,             // Matches recognizer config
         },
         // Optimize for human conversation
-        model: 'chirp_2',                     // Using the Chirp-2 model as configured
+        model: 'latest_long',                     // Using the latest_long model as configured
         languageCode: "en-US",                // Using single language code format for V2 API
         adaptation: {
           phraseSetReferences: [],            // Can be used later for custom vocabulary
