@@ -29,12 +29,36 @@ jobs:
           node-version: '20.x'
           cache: 'npm' # Use built-in npm caching
 
+      # Cache both npm and node_modules for faster builds
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-modules-
+
+      # Only run npm ci if cache miss
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit
+
       - name: Build application
         run: npm run build --if-present
 
-      # Zip the entire directory AFTER build (including dist, package.json, .npmrc etc.)
+      # Remove development dependencies before packaging
+      - name: Prune development dependencies
+        run: npm prune --production
+
+      # Create deployment package with dist and production node_modules
       - name: Create deployment package
-        run: zip -r ../release.zip .
+        run: |
+          mkdir -p deploy
+          cp -r dist deploy/
+          cp -r node_modules deploy/ # Copy pruned production modules
+          cp package.json .npmrc deploy/ # Copy necessary config/manifest files
+          (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
