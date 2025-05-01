@@ -50,46 +50,36 @@ export class SpeechToTextService {
       `Starting V2 transcription for profile ${profileId}, audio buffer (${audioBytes.length} bytes)` // <-- Update log
     );
 
-    const recognizerName = this.configService.get<string>(
-      'GOOGLE_SPEECH_RECOGNIZER_NAME',
-    );
-
-    if (!recognizerName) {
-      this.logger.error('GOOGLE_SPEECH_RECOGNIZER_NAME environment variable is not configured.');
-      throw new Error('Speech recognizer name configuration is missing.');
-    }
-
-    // Using explicit config now, matching the updated recognizer settings
-    const request = {
-      // recognizer: recognizerName, // Remove recognizer field
+    // Define the full configuration explicitly
+    // Use 'any' type due to library expecting V1 types in recognize() signature
+    const request: any = {
+      // recognizer: recognizerName, // Ensure recognizer field is removed or commented out
       config: { 
-        // Use explicitDecodingConfig matching M4A_AAC settings
-        explicitDecodingConfig: {
-          encoding: 'M4A_AAC', // Expect M4A container with AAC codec
-          sampleRateHertz: 16000, // Expect 16kHz
-          audioChannelCount: 1,
-        },
-        // Keep features and language code specified inline
+        // Specify model and language explicitly
+        model: 'chirp_2',
+        // Use languageCodes (plural array) as expected by V2 config type
+        languageCodes: ["en-US"],
+        // Use auto decoding to handle different client formats (WAV, WEBM)
+        autoDecodingConfig: {},
+        // Specify required features
         features: {
-          enableAutomaticPunctuation: false,  // Matches recognizer setting
-          enableSpokenPunctuation: false,     // Matches recognizer setting
-          enableWordConfidence: true,         // Matches recognizer setting
-          profanityFilter: false,             // Matches recognizer setting
+          enableWordConfidence: true,
+          // Defaults for others are false, but explicitly setting for clarity
+          enableAutomaticPunctuation: false, 
+          enableSpokenPunctuation: false,    
+          profanityFilter: false,            
         },
-        languageCode: "en-US",                // Specify language
-        // adaptation: {                      // No adaptation needed for now
-        //   phraseSetReferences: [],            
-        // },
       },
       audio: {
         content: audioBytes.toString('base64')
       },
-    } as any; // Use type assertion to bypass TypeScript checking
+    };
 
     try {
-      this.logger.debug('Sending V2 transcription request with audio content...');
+      // Log the relevant parts of the config being used
+      this.logger.debug(`Sending V2 transcription request with model: ${request.config?.model}, language: ${request.config?.languageCodes?.join(', ')}, autoDecoding: true ...`);
 
-      // Use any type to work with V2 API that might not fully match TypeScript definitions
+      // Still cast response to V2 type
       const [response] = await this.speechClient.recognize(request) as [RecognizeResponseV2, any, any];
 
       this.logger.debug('Received V2 transcription response');
