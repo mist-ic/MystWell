@@ -16,7 +16,12 @@
         "foregroundImage": "./assets/images/logo.jpg",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.mistic.MystWellNative"
+      "package": "com.mistic.MystWellNative",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "WAKE_LOCK"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -43,7 +48,19 @@
         }
       ],
       "expo-font",
-      "react-native-document-scanner-plugin"
+      "react-native-document-scanner-plugin",
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow MystWell to access your microphone for recording medical notes"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

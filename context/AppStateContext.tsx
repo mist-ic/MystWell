@@ -5,12 +5,14 @@ import { AppState, Platform } from 'react-native';
 type AppStateContextType = {
   isActive: boolean;
   currentState: string;
+  lastActiveTimestamp: number;
 };
 
 // Create the context with default values
 const AppStateContext = createContext<AppStateContextType>({
   isActive: true,
   currentState: AppState.currentState,
+  lastActiveTimestamp: Date.now(),
 });
 
 // Provider component
@@ -18,6 +20,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const appState = useRef(AppState.currentState);
   const [isActive, setIsActive] = useState<boolean>(appState.current === 'active');
   const [currentState, setCurrentState] = useState<string>(appState.current);
+  const [lastActiveTimestamp, setLastActiveTimestamp] = useState<number>(Date.now());
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
@@ -27,6 +30,13 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (isGoingActive) {
         console.log('[AppState] App has come to the foreground!');
         setIsActive(true);
+        setLastActiveTimestamp(Date.now());
+        
+        // Additional Android-specific handling
+        if (Platform.OS === 'android') {
+          // Force any UI updates or reconnections needed
+          console.log('[AppState] Android app activated - triggering refresh');
+        }
       } else if (isGoingBackground) {
         console.log('[AppState] App has gone to the background!');
         setIsActive(false);
@@ -44,6 +54,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setIsActive(true);
         appState.current = 'active';
         setCurrentState('active');
+        setLastActiveTimestamp(Date.now());
       });
 
       window.addEventListener('blur', () => {
@@ -66,7 +77,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   return (
-    <AppStateContext.Provider value={{ isActive, currentState }}>
+    <AppStateContext.Provider value={{ isActive, currentState, lastActiveTimestamp }}>
       {children}
     </AppStateContext.Provider>
   );

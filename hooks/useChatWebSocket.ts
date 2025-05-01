@@ -377,6 +377,15 @@ export const useChatWebSocket = () => {
       if (!socketRef.current?.connected) {
         console.log('Reconnecting socket on foreground...');
         socketRef.current?.connect();
+      } else if (Platform.OS === 'android') {
+        // On Android, sometimes we need to force a reconnection
+        console.log('Android app active: Force reconnect socket');
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          setTimeout(() => {
+            socketRef.current?.connect();
+          }, 300);
+        }
       }
         
       // Force refresh state even if connected
@@ -399,6 +408,9 @@ export const useChatWebSocket = () => {
       if (Platform.OS === 'web') {
         // Keep connection alive but mark app state
         socketRef.current?.emit('clientState', { state: 'background' });
+      } else if (Platform.OS === 'android') {
+        // On Android, we need to be more careful with background connections
+        console.log('Android app in background: Preserving connection state');
       }
     }
   }, [isActive, currentState, session, profile?.id, activeSessionId]);
