@@ -47,38 +47,35 @@ export class SpeechToTextService {
     profileId: string, // <-- Add profileId parameter
   ): Promise<string | null> {
     this.logger.log(
-      `Starting V2 transcription for profile ${profileId}, audio buffer (${audioBytes.length} bytes)` // <-- Update log
+      `Starting V2 transcription for profile ${profileId}, audio buffer (${audioBytes.length} bytes)`
     );
 
-    // Define the full configuration explicitly
-    // Use 'any' type due to library expecting V1 types in recognize() signature
+    // Get the recognizer name from config
+    const recognizerName = this.configService.get<string>(
+      'GOOGLE_SPEECH_RECOGNIZER_NAME',
+    );
+
+    if (!recognizerName) {
+      this.logger.error('GOOGLE_SPEECH_RECOGNIZER_NAME environment variable is not configured.');
+      throw new Error('Speech recognizer name configuration is missing.');
+    }
+
+    // Define the request using the recognizer AND the singular languageCode
+    // Use 'any' type to bypass potential type mismatches
     const request: any = {
-      // recognizer: recognizerName, // Ensure recognizer field is removed or commented out
-      config: { 
-        // Specify model and language explicitly
-        model: 'chirp_2',
-        // Use languageCodes (plural array) as expected by V2 config type
-        languageCodes: ["en-US"],
-        // Use auto decoding to handle different client formats (WAV, WEBM)
-        autoDecodingConfig: {},
-        // Specify required features
-        features: {
-          enableWordConfidence: true,
-          // Defaults for others are false, but explicitly setting for clarity
-          enableAutomaticPunctuation: false, 
-          enableSpokenPunctuation: false,    
-          profanityFilter: false,            
-        },
+      recognizer: recognizerName, // Use the recognizer name from env var
+      config: {
+        // Add singular languageCode back as it seems required alongside the recognizer
+        languageCode: "en-US", 
       },
       audio: {
-        content: audioBytes.toString('base64')
+        content: audioBytes.toString('base64'),
       },
     };
 
     try {
-      // Log the relevant parts of the config being used - safely access the first language code
-      const langCodeForLog = Array.isArray(request.config?.languageCodes) ? request.config.languageCodes[0] : 'unknown';
-      this.logger.debug(`Sending V2 transcription request with model: ${request.config?.model}, language: ${langCodeForLog}, autoDecoding: true ...`);
+      // Log the recognizer and language being used
+      this.logger.debug(`Sending V2 transcription request using recognizer: ${recognizerName} and language: ${request.config?.languageCode}...`);
 
       // Still cast response to V2 type
       const [response] = await this.speechClient.recognize(request) as [RecognizeResponseV2, any, any];
