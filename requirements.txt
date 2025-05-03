@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+google-cloud-speech>=2.20.0 # Pinning to a version known to support V2 features like M4A_AAC
+python-dotenv
+python-multipart
+requests
+# Optional: ffmpeg-python 
