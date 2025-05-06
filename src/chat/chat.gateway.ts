@@ -10,7 +10,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
-import { Logger, UnauthorizedException, UseGuards, Inject, InternalServerErrorException } from '@nestjs/common';
+import { Logger, UnauthorizedException, UseGuards, Inject, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { SupabaseClient, User } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +20,10 @@ import { Database } from '../supabase/database.types';
 interface SocketUserData {
     user: User;
     profileId: string;
+}
+
+interface AuthenticatedSocket extends Socket {
+    userData?: SocketUserData; // Optional because it's added in middleware
 }
 
 // Payload from client when sending a message
@@ -43,9 +47,9 @@ type ChatSessionRow = Database['public']['Tables']['chat_sessions']['Row'];
 
 @WebSocketGateway({
   // cors: {
-  //   origin: '*', // TODO: Restrict in production
+  //   origin: configService.get('WEBSOCKET_CORS_ORIGIN'), // Example
   // },
-  // Consider namespace: namespace: 'chat'
+  // namespace: configService.get('WEBSOCKET_NAMESPACE') // Example
 })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -61,6 +65,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
     // Inject service role client (for profile check bypassing RLS)
     @Inject(SUPABASE_SERVICE_ROLE_CLIENT) private readonly supabaseAdmin: SupabaseClient,
+    private readonly configService: ConfigService
   ) {}
 
   afterInit(server: Server) {
@@ -117,7 +122,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
         // 3. Attach user and profileId to socket...
         const socketData: SocketUserData = { user, profileId };
-        (socket as any).userData = socketData; 
+        (socket as AuthenticatedSocket).userData = socketData; 
         this.socketUserMap.set(socket.id, socketData); 
         this.logger.log(`WS Client Authenticated: ${user.id} (Profile: ${profileId}, Socket: ${socket.id})`);
         next();
@@ -128,8 +133,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     });
   }
 
-  handleConnection(client: Socket, ...args: any[]) {
-    const userData = (client as any).userData as SocketUserData;
+  handleConnection(client: AuthenticatedSocket, ...args: any[]) {
+    const userData = client.userData;
     if (userData?.user?.id) {
         // We already logged authentication in middleware
         this.logger.log(`Client connected: ${client.id} (User: ${userData.user.id}, Profile: ${userData.profileId})`);
@@ -142,7 +147,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
-  handleDisconnect(client: Socket) {
+  handleDisconnect(client: AuthenticatedSocket) {
      const userData = this.socketUserMap.get(client.id);
      if (userData?.user?.id) {
          this.logger.log(`Client disconnected: ${client.id} (User: ${userData.user.id}, Profile: ${userData.profileId})`);
@@ -156,8 +161,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   // --- Event Handlers ---
 
   @SubscribeMessage('listSessions')
-  async handleListSessions(@ConnectedSocket() client: Socket): Promise<void> {
-      const userData = (client as any).userData as SocketUserData;
+  async handleListSessions(@ConnectedSocket() client: AuthenticatedSocket): Promise<void> {
+      const userData = client.userData;
       if (!userData?.profileId) return this.emitAuthError(client, 'listSessions');
 
       this.logger.log(`Session list requested by user ${userData.user.id} / profile ${userData.profileId} (${client.id})`);
@@ -176,9 +181,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('createSession')
   async handleCreateSession(
       @MessageBody() payload: CreateSessionPayload,
-      @ConnectedSocket() client: Socket,
+      @ConnectedSocket() client: AuthenticatedSocket,
   ): Promise<void> {
-      const userData = (client as any).userData as SocketUserData;
+      const userData = client.userData;
       if (!userData?.profileId) return this.emitAuthError(client, 'createSession');
 
       const { title } = payload;
@@ -201,9 +206,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('sendMessage')
   async handleMessage(
     @MessageBody() payload: SendMessagePayload,
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ): Promise<void> {
-    const userData = (client as any).userData as SocketUserData;
+    const userData = client.userData;
     if (!userData?.profileId) return this.emitAuthError(client, 'sendMessage');
     
     const { sessionId, message: messageText } = payload;
@@ -239,9 +244,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('getHistory')
   async handleGetHistory(
     @MessageBody() payload: GetHistoryPayload,
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ): Promise<void> {
-      const userData = (client as any).userData as SocketUserData;
+      const userData = client.userData;
       if (!userData?.profileId) return this.emitAuthError(client, 'getHistory');
 
       const { sessionId } = payload;
@@ -253,62 +258,29 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
       
       this.logger.log(`History requested by user ${userData.user.id} / profile ${userData.profileId} (${client.id}) for session ${sessionId}`);
       try {
-          // Query Supabase directly (alternative: add public getHistory to ChatService)
-          // Use the correct profileId
+          // Use ChatService to get history
           const profileId = userData.profileId;
-          // Validate the user owns this session first (using the ADMIN client)
-          const { count, error: countError } = await this.supabaseAdmin // Use supabaseAdmin here
-            .from('chat_sessions')
-            .select('*' , { count: 'exact', head: true })
-            .eq('id', sessionId)
-            .eq('profile_id', profileId); 
+          const history = await this.chatService.getSessionHistory(sessionId, profileId);
           
-          if(countError) {
-              // Log the specific DB error
-              this.logger.error(`DB error checking session ownership for session ${sessionId}, profile ${profileId}: ${countError.message}`);
-              client.emit('error', { message: 'Error verifying chat session.'});
-              return;
-          }
-          
-          if(count === 0) {
-               // Session not found OR doesn't belong to this profile
-               this.logger.warn(`Profile ${profileId} requested history for session ${sessionId} they don't own or doesn't exist (admin check).`);
-               client.emit('error', { message: 'Chat session not found or access denied.'});
-               return; 
-          }
-
-          // Now fetch messages using admin client
-          const { data: historyData, error: historyError } = await this.supabaseAdmin // Use Admin client here too for consistency
-            .from('chat_messages')
-            .select('role, content, created_at')
-            .eq('session_id', sessionId)
-            .order('created_at', { ascending: true })
-            .limit(100); // Increased limit slightly
-
-          if (historyError) {
-             this.logger.error(`Error fetching history messages for session ${sessionId}: ${historyError.message}`);
-             client.emit('error', { message: 'Failed to retrieve chat history messages.'});
-             return;
-          }
-          
-          const history = historyData.map(msg => ({
-              sender: msg.role === 'model' ? 'bot' : 'user', // Map model to bot for frontend
-              text: msg.content,
-              timestamp: msg.created_at
-          }));
-
           this.logger.log(`Sending ${history.length} history messages for session ${sessionId} to profile ${profileId}`);
           // Include sessionId in the history event
           client.emit('chatHistory', { sessionId: sessionId, history }); 
 
       } catch(error) {
           this.logger.error(`Error fetching history for session ${sessionId}, profile ${userData.profileId}: ${error.message}`, error.stack);
-          client.emit('error', { message: 'Failed to retrieve chat history.' });
+          // Let specific errors from service propagate if needed, or handle common ones
+          if (error instanceof NotFoundException) {
+            client.emit('error', { message: error.message });
+          } else if (error instanceof InternalServerErrorException) {
+            client.emit('error', { message: error.message });
+          } else {
+            client.emit('error', { message: 'Failed to retrieve chat history.' });
+          }
       }
   }
 
   // Helper to emit auth error
-  private emitAuthError(client: Socket, handlerName: string) {
+  private emitAuthError(client: AuthenticatedSocket, handlerName: string) {
     this.logger.error(`${handlerName} handler: User/Profile data not found on socket ${client.id}. Auth middleware might have failed or state is inconsistent.`);
     client.emit('error', { message: 'Authentication error, cannot process request.' });
   }
