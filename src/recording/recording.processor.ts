@@ -3,7 +3,7 @@ import { Job } from 'bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import { RECORDING_PROCESSING_QUEUE } from './constants';
 import { SpeechToTextService } from './speech-to-text.service';
-import { GeminiAnalysisService, StructuredRecordingDetails } from './gemini-analysis.service';
+import { GeminiAnalysisService } from './gemini-analysis.service';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
 import { RecordingService } from './recording.service';
@@ -11,6 +11,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Buffer } from 'buffer';
 import { AxiosError, AxiosResponse } from 'axios';
+import { AudioProcessorService } from './audio-processor.service';
 // import { PrismaService } from '../prisma/prisma.service'; // Assuming Prisma or similar for DB interaction
 
 // Define the structure of the job data we expect
@@ -32,6 +33,7 @@ export class RecordingProcessor extends WorkerHost {
     private readonly httpService: HttpService,
     private readonly speechToTextService: SpeechToTextService,
     private readonly geminiAnalysisService: GeminiAnalysisService,
+    private readonly audioProcessorService: AudioProcessorService,
     // private readonly prisma: PrismaService, // Inject DB service
   ) {
     super(); // Important: Call super() in constructor
@@ -39,7 +41,7 @@ export class RecordingProcessor extends WorkerHost {
 
   async process(job: Job<RecordingJobData>): Promise<void> {
     const { recordingId, profileId, storagePath, userId } = job.data;
-    this.logger.log(`Processing recording ${recordingId} for profile ${profileId} - attempt ${job.attemptsMade + 1}`);
+    this.logger.log(`Processing recording ${recordingId} for profile ${profileId}`);
 
     try {
       // Set initial processing status
@@ -76,16 +78,16 @@ export class RecordingProcessor extends WorkerHost {
           }),
         );
         audioBytes = Buffer.from(response.data);
-        this.logger.log(`Successfully downloaded ${audioBytes.length} bytes for recording ${recordingId}`);
+        this.logger.log(`Downloaded ${audioBytes.length} bytes for recording ${recordingId}`);
       } catch (downloadError) {
         // More specific error handling for download failures
         let errorMessage = 'Failed to download audio file';
         
         if (downloadError instanceof AxiosError) {
           if (downloadError.code === 'ECONNABORTED') {
-            errorMessage = 'Download timeout - the server took too long to respond';
+            errorMessage = 'Download timeout';
           } else if (downloadError.response) {
-            errorMessage = `Download failed with status ${downloadError.response.status}: ${downloadError.message}`;
+            errorMessage = `Download failed with status ${downloadError.response.status}`;
           }
         }
         
@@ -109,136 +111,115 @@ export class RecordingProcessor extends WorkerHost {
         return;
       }
 
-      // 3. Transcribe the audio
+      // 3. Detect format and convert to WAV if needed
+      const inputFormat = await this.audioProcessorService.detectFormat(audioBytes);
+      this.logger.log(`Detected input format: ${inputFormat}`);
+
+      let processedAudioBytes: Buffer;
       try {
-        const rawTranscript = await this.speechToTextService.transcribeAudio(
-            audioBytes,
-            profileId
-        );
+        processedAudioBytes = await this.audioProcessorService.convertToWav(audioBytes, inputFormat);
+        this.logger.log(`Converted audio to WAV format, size: ${processedAudioBytes.length} bytes`);
+      } catch (conversionError) {
+        throw new Error(`Audio conversion failed: ${conversionError.message}`);
+      }
 
-        if (!rawTranscript) {
-          this.logger.error(`Transcription failed or returned empty for recording ${recordingId}`);
-          await this.recordingService.updateRecordingStatus(
-            userId, 
-            recordingId, 
-            'transcription_failed', 
-            'Transcription failed or returned empty'
-          );
-          return;
-        }
+      // 4. Transcribe the processed audio
+      const rawTranscript = await this.speechToTextService.transcribeAudio(
+        processedAudioBytes,
+        profileId
+      );
 
-        // Update status and save transcript
-        await this.recordingService.updateRecordingStatus(
-          userId,
-          recordingId,
-          'transcribing_completed'
-        );
-        
-        this.logger.log(`Transcription completed for recording ${recordingId}`);
-        
-        // Also update the raw_transcript field directly
-        const { error: transcriptUpdateError } = await this.supabaseAdmin
-          .from('recordings')
-          .update({
-            raw_transcript: rawTranscript,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', recordingId);
-          
-        if (transcriptUpdateError) {
-          this.logger.error(`Failed to save transcript for recording ${recordingId}: ${transcriptUpdateError.message}`);
-          // Continue processing but log the error
-        }
-
-        // 4. Analyze with Gemini
-        const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(
-            rawTranscript,
-            profileId
-        );
-
-        if (!structuredDetails) {
-          this.logger.error(`Analysis failed or returned empty for recording ${recordingId}`);
-          await this.recordingService.updateRecordingStatus(
-            userId, 
-            recordingId, 
-            'analysis_failed', 
-            'Analysis failed or returned empty'
-          );
-          return;
-        }
-
-        // Update status and save structured details
-        const { error: finalUpdateError } = await this.supabaseAdmin
-          .from('recordings')
-          .update({
-            structured_details: structuredDetails,
-            status: 'completed',
-            error: null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', recordingId);
-          
-        if (finalUpdateError) {
-          this.logger.error(`Failed to save final analysis for recording ${recordingId}: ${finalUpdateError.message}`);
-          await this.recordingService.updateRecordingStatus(
-            userId, 
-            recordingId, 
-            'save_failed', 
-            'Failed to save analysis results'
-          );
-          return;
-        }
-        
-        this.logger.log(`Successfully completed processing recording ${recordingId}`);
-      } catch (processingError) {
-        // Handle transcription and analysis errors
-        this.logger.error(`Processing error for recording ${recordingId}: ${processingError.message}`, processingError);
-        
-        const errorPhase = processingError.message.includes('transcribe') 
-          ? 'transcription_failed' 
-          : 'analysis_failed';
-          
+      if (!rawTranscript) {
+        this.logger.error(`Transcription failed or returned empty for recording ${recordingId}`);
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
-          errorPhase, 
-          processingError.message || 'Processing error'
+          'transcription_failed', 
+          'Transcription failed or returned empty'
         );
-        
-        // For Google API quota errors, we might want to delay and retry
-        if (processingError.message.includes('quota') || 
-            processingError.message.includes('rate limit')) {
-          throw processingError; // Allow retry with backoff
-        }
-        
         return;
       }
 
-    } catch (error) {
-      this.logger.error(`Error processing recording ${recordingId}: ${error.message}`, error);
+      // Update status and save transcript
+      await this.recordingService.updateRecordingStatus(
+        userId,
+        recordingId,
+        'transcribing_completed'
+      );
       
-      try {
-        const finalErrorStatus = error.message.includes('download') 
-          ? 'download_failed' 
-          : error.message.includes('quota') || error.message.includes('rate limit')
-            ? 'quota_exceeded'
-            : 'processing_failed';
-            
-        const errorMsg = finalErrorStatus === 'quota_exceeded'
-          ? 'API rate limit exceeded. Will retry automatically.'
-          : (error.message || 'Unknown processing error');
-          
+      this.logger.log(`Transcription completed for recording ${recordingId}`);
+      
+      // Also update the raw_transcript field directly
+      const { error: transcriptUpdateError } = await this.supabaseAdmin
+        .from('recordings')
+        .update({
+          raw_transcript: rawTranscript,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', recordingId);
+        
+      if (transcriptUpdateError) {
+        this.logger.error(`Failed to save transcript for recording ${recordingId}: ${transcriptUpdateError.message}`);
+        // Continue processing but log the error
+      }
+
+      // 5. Analyze with Gemini
+      const structuredDetails = await this.geminiAnalysisService.extractDetailsFromTranscript(
+        rawTranscript,
+        profileId
+      );
+
+      if (!structuredDetails) {
+        this.logger.error(`Analysis failed or returned empty for recording ${recordingId}`);
         await this.recordingService.updateRecordingStatus(
           userId, 
           recordingId, 
-          finalErrorStatus, 
-          errorMsg
+          'analysis_failed', 
+          'Analysis failed or returned empty'
         );
-      } catch (dbError) {
-        this.logger.error(`Failed to update recording status after error: ${dbError.message}`);
+        return;
+      }
+
+      // Update status and save structured details
+      const { error: finalUpdateError } = await this.supabaseAdmin
+        .from('recordings')
+        .update({
+          structured_details: structuredDetails,
+          status: 'completed',
+          error: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', recordingId);
+        
+      if (finalUpdateError) {
+        this.logger.error(`Failed to save final analysis for recording ${recordingId}: ${finalUpdateError.message}`);
+        await this.recordingService.updateRecordingStatus(
+          userId, 
+          recordingId, 
+          'save_failed', 
+          'Failed to save analysis results'
+        );
+        return;
       }
       
-      // Mark the job as failed
+      this.logger.log(`Successfully completed processing recording ${recordingId}`);
+    } catch (error) {
+      this.logger.error(`Processing error for recording ${recordingId}:`, error);
+      
+      const errorPhase = error.message.includes('transcribe') 
+        ? 'transcription_failed' 
+        : error.message.includes('analysis')
+        ? 'analysis_failed'
+        : 'failed';
+        
+      await this.recordingService.updateRecordingStatus(
+        userId,
+        recordingId,
+        errorPhase,
+        error.message
+      );
+      
+      // Re-throw for job handling
       throw error;
     }
   }

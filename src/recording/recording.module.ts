@@ -10,6 +10,7 @@ import { RECORDING_PROCESSING_QUEUE } from './constants'; // Assume constants fi
 import { RecordingProcessor } from './recording.processor'; // Import the processor
 import { HttpModule } from '@nestjs/axios'; // Import HttpModule
 import { SupabaseModule } from '../supabase/supabase.module'; // Import SupabaseModule
+import { AudioProcessorService } from './audio-processor.service';
 
 @Module({
   imports: [
@@ -49,6 +50,8 @@ import { SupabaseModule } from '../supabase/supabase.module'; // Import Supabase
     SpeechToTextService, // Add new service
     GeminiAnalysisService, // Add new service
     RecordingProcessor, // Add the processor
+    AudioProcessorService,
   ],
+  exports: [RecordingService],
 })
 export class RecordingModule {} 
