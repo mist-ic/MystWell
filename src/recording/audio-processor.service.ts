@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as ffmpeg from 'fluent-ffmpeg';
 import { Readable } from 'stream';
 import { Buffer } from 'buffer';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AudioProcessorService {
@@ -58,27 +62,45 @@ export class AudioProcessorService {
   }
 
   /**
-   * Detects the audio format from the buffer
+   * Detects the audio format from the buffer by writing it to a temporary file
    * @param audioBuffer Input audio buffer
    * @returns Promise<string> Detected format
    */
   async detectFormat(audioBuffer: Buffer): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const inputStream = new Readable();
-      inputStream.push(audioBuffer);
-      inputStream.push(null);
+    const tempDir = os.tmpdir();
+    const tempFile = path.join(tempDir, `temp-${uuidv4()}`);
 
-      ffmpeg.ffprobe(inputStream, (err, metadata) => {
-        if (err) {
-          this.logger.error('Error detecting format:', err);
-          reject(err);
-          return;
-        }
+    try {
+      // Write buffer to temporary file
+      await fs.writeFile(tempFile, audioBuffer);
 
-        const format = metadata.format.format_name;
-        this.logger.log(`Detected audio format: ${format}`);
-        resolve(format.split(',')[0]); // Take first format if multiple are detected
+      return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(tempFile, (err, metadata) => {
+          // Clean up temp file
+          fs.unlink(tempFile).catch(e => 
+            this.logger.warn(`Failed to delete temp file ${tempFile}:`, e)
+          );
+
+          if (err) {
+            this.logger.error('Error detecting format:', err);
+            reject(err);
+            return;
+          }
+
+          const format = metadata?.format?.format_name;
+          if (!format) {
+            reject(new Error('Could not detect audio format'));
+            return;
+          }
+
+          this.logger.log(`Detected audio format: ${format}`);
+          resolve(format.split(',')[0]); // Take first format if multiple are detected
+        });
       });
-    });
+    } catch (error) {
+      // Clean up temp file in case of error
+      await fs.unlink(tempFile).catch(() => {});
+      throw error;
+    }
   }
 } 
