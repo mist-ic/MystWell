@@ -53,8 +53,55 @@ jobs:
           mkdir -p deploy
           cp -r dist deploy/
           cp package.json package-lock.json deploy/
-          # Create startup script
-          echo "apt-get update && apt-get install -y ffmpeg && npm ci --production && npm start" > deploy/startup.sh
+          # Create startup script with proper error handling and logging
+          cat > deploy/startup.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          log() {
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+          }
+
+          error() {
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" >&2
+            exit 1
+          }
+
+          # Function to check if a command exists
+          command_exists() {
+            command -v "$1" >/dev/null 2>&1
+          }
+
+          log "Starting deployment process..."
+
+          # Update package repositories
+          log "Updating package repositories..."
+          apt-get update || error "Failed to update package repositories"
+
+          # Install ffmpeg if not already installed
+          if ! command_exists ffmpeg; then
+            log "Installing ffmpeg..."
+            apt-get install -y ffmpeg || error "Failed to install ffmpeg"
+          else
+            log "ffmpeg is already installed"
+          fi
+
+          # Verify ffmpeg installation
+          ffmpeg -version || error "Failed to verify ffmpeg installation"
+
+          # Install production dependencies
+          log "Installing production dependencies..."
+          npm ci --production --prefer-offline || error "Failed to install npm dependencies"
+
+          # Verify key dependencies
+          log "Verifying dependencies..."
+          node -e "require('fluent-ffmpeg')" || error "Failed to load fluent-ffmpeg module"
+
+          # Start the application
+          log "Starting application..."
+          npm run start:prod
+          EOF
+
           chmod +x deploy/startup.sh
           (cd deploy && zip -r ../release.zip .)
 
