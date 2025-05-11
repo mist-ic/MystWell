@@ -29,12 +29,6 @@ jobs:
           node-version: '20.x'
           cache: 'npm' # Use built-in npm caching
 
-      # Install ffmpeg
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
       # Cache both npm and node_modules for faster builds
       - name: Cache node_modules
         uses: actions/cache@v4
@@ -44,6 +38,7 @@ jobs:
           key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-modules-
+
       # Only run npm ci if cache miss
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
@@ -58,7 +53,11 @@ jobs:
           mkdir -p deploy
           cp -r dist deploy/
           cp package.json package-lock.json deploy/
+          # Create startup script
+          echo "apt-get update && apt-get install -y ffmpeg && npm ci --production && npm start" > deploy/startup.sh
+          chmod +x deploy/startup.sh
           (cd deploy && zip -r ../release.zip .)
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -89,6 +88,26 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_21537E7DEDFE46EEB3B46C952CF05AD6 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F7C94749BE64D22A5CA9B76A74636E4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1D3F8F2A20EA4FDCB691B7F4246B9276 }}
+
+      # Configure the startup command in Azure Web App
+      - name: Configure Azure Web App
+        uses: azure/appservice-settings@v1
+        with:
+          app-name: 'mystwell-api'
+          app-settings-json: '[
+            {
+              "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
+              "value": "true"
+            },
+            {
+              "name": "WEBSITE_RUN_FROM_PACKAGE",
+              "value": "0"
+            },
+            {
+              "name": "STARTUP_COMMAND",
+              "value": "sh startup.sh"
+            }
+          ]'
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
