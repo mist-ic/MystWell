@@ -52,9 +52,9 @@ jobs:
         run: |
           mkdir -p deploy
           cp -r dist deploy/
-          cp package.json package-lock.json deploy/
-          # Create startup script with proper error handling and logging
-          cat > deploy/startup.sh << 'EOF'
+          cp package*.json deploy/
+          # Create startup script
+          cat > deploy/.startup.sh << 'EOF'
           #!/bin/bash
           set -e
 
@@ -67,24 +67,15 @@ jobs:
             exit 1
           }
 
-          # Function to check if a command exists
-          command_exists() {
-            command -v "$1" >/dev/null 2>&1
-          }
-
           log "Starting deployment process..."
 
           # Update package repositories
           log "Updating package repositories..."
           apt-get update || error "Failed to update package repositories"
 
-          # Install ffmpeg if not already installed
-          if ! command_exists ffmpeg; then
-            log "Installing ffmpeg..."
-            apt-get install -y ffmpeg || error "Failed to install ffmpeg"
-          else
-            log "ffmpeg is already installed"
-          fi
+          # Install ffmpeg
+          log "Installing ffmpeg..."
+          apt-get install -y ffmpeg || error "Failed to install ffmpeg"
 
           # Verify ffmpeg installation
           ffmpeg -version || error "Failed to verify ffmpeg installation"
@@ -99,10 +90,28 @@ jobs:
 
           # Start the application
           log "Starting application..."
-          npm run start:prod
+          exec npm run start:prod
           EOF
 
-          chmod +x deploy/startup.sh
+          chmod +x deploy/.startup.sh
+
+          # Create a PM2 ecosystem file for proper process management
+          cat > deploy/ecosystem.config.js << 'EOF'
+          module.exports = {
+            apps: [{
+              name: 'mystwell-api',
+              script: '.startup.sh',
+              instances: 1,
+              autorestart: true,
+              watch: false,
+              max_memory_restart: '1G',
+              env: {
+                NODE_ENV: 'production'
+              }
+            }]
+          };
+          EOF
+
           (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
@@ -151,8 +160,12 @@ jobs:
               "value": "0"
             },
             {
+              "name": "PM2_HOME",
+              "value": "/home/site/wwwroot/.pm2"
+            },
+            {
               "name": "STARTUP_COMMAND",
-              "value": "sh startup.sh"
+              "value": "npm install -g pm2 && pm2 start ecosystem.config.js --no-daemon"
             }
           ]'
 
