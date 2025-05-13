@@ -5,8 +5,7 @@ on:
       - Backy
   workflow_dispatch:
 
-# Add concurrency to cancel duplicate runs
-concurrency: # <-- concurrency should be the next key
+concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -118,25 +117,7 @@ jobs:
         uses: azure/appservice-settings@v1
         with:
           app-name: 'mystwell-api'
-          app-settings-json: '[
-            {
-              "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
-              "value": "true"
-            },
-            {
-              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
-              "value": "false"
-            },
-            {
-              "name": "WEBSITE_RUN_FROM_PACKAGE",
-              "value": "0"
-            },
-            {
-              "name": "STARTUP_COMMAND",
-              "value": "chmod +x init.sh && ./init.sh"
-            }
-            # FFMPEG_PATH and FFPROBE_PATH are set by init.sh script using 'export'
-          ]'
+          app-settings-json: '[{"name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE", "value": "true"}, {"name": "SCM_DO_BUILD_DURING_DEPLOYMENT", "value": "false"}, {"name": "WEBSITE_RUN_FROM_PACKAGE", "value": "0"}, {"name": "STARTUP_COMMAND", "value": "chmod +x init.sh && ./init.sh"}]'
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
