@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - Backy
-  workflow_dispatch # <-- workflow_dispatch should end here
+  workflow_dispatch:
 
 # Add concurrency to cancel duplicate runs
 concurrency: # <-- concurrency should be the next key
