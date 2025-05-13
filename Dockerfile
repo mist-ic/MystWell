@@ -1,4 +1,4 @@
-FROM node:20-lts
+FROM node:20.19.1
 
 # Install FFmpeg
 RUN apt-get update && \
