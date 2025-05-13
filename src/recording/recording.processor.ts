@@ -47,6 +47,21 @@ export class RecordingProcessor extends WorkerHost {
       // Set initial processing status
       await this.recordingService.updateRecordingStatus(userId, recordingId, 'processing');
 
+      // Check if FFmpeg is available
+      if (!this.audioProcessorService.isFFmpegAvailable()) {
+        const errorMsg = 'FFmpeg is not installed or configured on the server. Audio processing cannot proceed.';
+        this.logger.error(errorMsg);
+        await this.recordingService.updateRecordingStatus(
+          userId, 
+          recordingId, 
+          'processing_failed', 
+          errorMsg
+        );
+        
+        // This is a permanent failure, not a transient one
+        throw new Error(errorMsg);
+      }
+
       // 1. Get Signed URL for the audio file from Supabase Storage
       const { data: signedUrlData, error: urlError } = await this.supabaseAdmin
         .storage
@@ -112,15 +127,24 @@ export class RecordingProcessor extends WorkerHost {
       }
 
       // 3. Detect format and convert to WAV if needed
-      const inputFormat = await this.audioProcessorService.detectFormat(audioBytes);
-      this.logger.log(`Detected input format: ${inputFormat}`);
-
+      let inputFormat: string;
       let processedAudioBytes: Buffer;
+      
       try {
+        inputFormat = await this.audioProcessorService.detectFormat(audioBytes);
+        this.logger.log(`Detected input format: ${inputFormat}`);
+        
         processedAudioBytes = await this.audioProcessorService.convertToWav(audioBytes, inputFormat);
         this.logger.log(`Converted audio to WAV format, size: ${processedAudioBytes.length} bytes`);
-      } catch (conversionError) {
-        throw new Error(`Audio conversion failed: ${conversionError.message}`);
+      } catch (processingError) {
+        this.logger.error(`Audio processing failed for recording ${recordingId}: ${processingError.message}`);
+        await this.recordingService.updateRecordingStatus(
+          userId, 
+          recordingId, 
+          'processing_failed', 
+          `Audio processing failed: ${processingError.message}`
+        );
+        throw processingError;
       }
 
       // 4. Transcribe the processed audio
@@ -210,6 +234,8 @@ export class RecordingProcessor extends WorkerHost {
         ? 'transcription_failed' 
         : error.message.includes('analysis')
         ? 'analysis_failed'
+        : error.message.includes('FFmpeg')
+        ? 'processing_failed'
         : 'failed';
         
       await this.recordingService.updateRecordingStatus(

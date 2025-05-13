@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as ffmpeg from 'fluent-ffmpeg';
 import { Readable } from 'stream';
 import { Buffer } from 'buffer';
@@ -6,10 +6,50 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
-export class AudioProcessorService {
+export class AudioProcessorService implements OnModuleInit {
   private readonly logger = new Logger(AudioProcessorService.name);
+  private ffmpegAvailable = false;
+
+  constructor(private readonly configService: ConfigService) {}
+
+  async onModuleInit() {
+    try {
+      // Try to set custom FFmpeg paths if they're configured
+      const ffmpegPath = this.configService.get<string>('FFMPEG_PATH');
+      const ffprobePath = this.configService.get<string>('FFPROBE_PATH');
+      
+      if (ffmpegPath) {
+        ffmpeg.setFfmpegPath(ffmpegPath);
+        this.logger.log(`Custom FFmpeg path set: ${ffmpegPath}`);
+      }
+      
+      if (ffprobePath) {
+        ffmpeg.setFfprobePath(ffprobePath);
+        this.logger.log(`Custom FFprobe path set: ${ffprobePath}`);
+      }
+      
+      // Verify that FFmpeg is available
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg.getAvailableFormats((err, formats) => {
+          if (err) {
+            this.logger.error('FFmpeg not available:', err.message);
+            this.ffmpegAvailable = false;
+            resolve(); // Continue without FFmpeg
+          } else {
+            this.ffmpegAvailable = true;
+            this.logger.log('FFmpeg is available and properly configured');
+            resolve();
+          }
+        });
+      });
+    } catch (error) {
+      this.logger.error('Error initializing FFmpeg:', error);
+      this.ffmpegAvailable = false;
+    }
+  }
 
   /**
    * Converts audio buffer to WAV format suitable for Google Speech-to-Text
@@ -19,6 +59,10 @@ export class AudioProcessorService {
    */
   async convertToWav(audioBuffer: Buffer, inputFormat: string): Promise<Buffer> {
     this.logger.log(`Converting ${inputFormat} audio to WAV format`);
+
+    if (!this.ffmpegAvailable) {
+      throw new Error('FFmpeg is not available. Audio conversion is not possible.');
+    }
 
     return new Promise((resolve, reject) => {
       // Create a readable stream from the buffer
@@ -67,6 +111,10 @@ export class AudioProcessorService {
    * @returns Promise<string> Detected format
    */
   async detectFormat(audioBuffer: Buffer): Promise<string> {
+    if (!this.ffmpegAvailable) {
+      throw new Error('FFmpeg is not available. Format detection is not possible.');
+    }
+
     const tempDir = os.tmpdir();
     const tempFile = path.join(tempDir, `temp-${uuidv4()}`);
 
@@ -102,5 +150,13 @@ export class AudioProcessorService {
       await fs.unlink(tempFile).catch(() => {});
       throw error;
     }
+  }
+
+  /**
+   * Performs a simple check to make sure FFmpeg is available
+   * @returns boolean indicating if FFmpeg is available
+   */
+  isFFmpegAvailable(): boolean {
+    return this.ffmpegAvailable;
   }
 } 
