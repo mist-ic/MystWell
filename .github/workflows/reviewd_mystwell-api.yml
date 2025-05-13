@@ -1,13 +1,12 @@
 name: Build and deploy Node.js app to Azure Web App - mystwell-api
-
 on:
   push:
     branches:
       - Backy
-  workflow_dispatch
+  workflow_dispatch # <-- workflow_dispatch should end here
 
 # Add concurrency to cancel duplicate runs
-concurrency:
+concurrency: # <-- concurrency should be the next key
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
