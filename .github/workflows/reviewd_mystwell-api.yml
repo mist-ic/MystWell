@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - Backy
-  workflow_dispatch:
+  workflow_dispatch
 
 # Add concurrency to cancel duplicate runs
 concurrency:
@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,8 +25,8 @@ jobs:
         id: setup-node
         uses: actions/setup-node@v3
         with:
-          node-version: '20.x'
-          cache: 'npm'
+          node-version: '20.x' # Sticking with 20.x based on recent files
+          cache: 'npm' # Use built-in npm caching
 
       # Cache both npm and node_modules for faster builds
       - name: Cache node_modules
@@ -39,7 +38,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-modules-
 
-      # Only run npm ci if cache miss
+      # Only run npm ci if cache miss - This installs fluent-ffmpeg
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --prefer-offline --no-audit
@@ -53,62 +52,36 @@ jobs:
           mkdir -p deploy
           cp -r dist deploy/
           cp package*.json deploy/
-          
-          # Create a ffmpeg config file
-          mkdir -p deploy/config
-          cat > deploy/config/ffmpeg.js << 'EOF'
-          const path = require('path');
 
-          module.exports = {
-            ffmpegPath: process.env.FFMPEG_PATH || '/usr/bin/ffmpeg',
-            ffprobePath: process.env.FFPROBE_PATH || '/usr/bin/ffprobe'
-          };
-          EOF
-          
-          # Create a simple initialization script
+          # Create a simple initialization script to install ffmpeg and start app
           cat > deploy/init.sh << 'EOF'
           #!/bin/bash
           set -e
-          echo "Installing ffmpeg..."
+
+          echo "Installing native ffmpeg..."
+          # Update and install ffmpeg - This runs on the Azure container startup
           apt-get update && apt-get install -y ffmpeg
-          
-          echo "Configuring ffmpeg paths..."
+
+          echo "Finding ffmpeg paths..."
           FFMPEG_BIN=$(which ffmpeg)
           FFPROBE_BIN=$(which ffprobe)
-          
+
           echo "ffmpeg found at: $FFMPEG_BIN"
           echo "ffprobe found at: $FFPROBE_BIN"
-          
-          # Set environment variables for fluent-ffmpeg
+
+          # Export paths for the Node.js process
           export FFMPEG_PATH=$FFMPEG_BIN
           export FFPROBE_PATH=$FFPROBE_BIN
-          
-          echo "Installing dependencies..."
-          npm ci --production --prefer-offline
-          echo "Installing fluent-ffmpeg explicitly..."
-          npm install --no-package-lock fluent-ffmpeg
-          
-          echo "Creating environment file with FFmpeg paths..."
-          cat > .env << EOT
-          FFMPEG_PATH=$FFMPEG_BIN
-          FFPROBE_PATH=$FFPROBE_BIN
-          EOT
-          
-          echo "Patching audio-processor.service.js to use correct ffmpeg paths..."
-          sed -i '1s/^/const ffmpeg = require("fluent-ffmpeg");\nffmpeg.setFfmpegPath(process.env.FFMPEG_PATH || "\/usr\/bin\/ffmpeg");\nffmpeg.setFfprobePath(process.env.FFPROBE_PATH || "\/usr\/bin\/ffprobe");\n\n/' dist/recording/audio-processor.service.js
-          
+
           echo "Starting application..."
-          npm run start:prod
+          # Assuming dist/main.js is your entry point
+          node dist/main
           EOF
-          
+
+          # Make the script executable
           chmod +x deploy/init.sh
-          
-          # Install fluent-ffmpeg explicitly
-          echo "Adding fluent-ffmpeg to deployment package"
-          cd deploy
-          npm install --no-package-lock --no-save fluent-ffmpeg
-          cd ..
-          
+
+          # Zip the deployment package
           (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
@@ -116,7 +89,7 @@ jobs:
         with:
           name: node-app
           path: release.zip
-          retention-days: 1
+          retention-days: 1 # Lower retention to save space
 
   deploy:
     runs-on: ubuntu-latest
@@ -127,7 +100,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -142,7 +114,7 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5F7C94749BE64D22A5CA9B76A74636E4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_1D3F8F2A20EA4FDCB691B7F4246B9276 }}
 
-      # Configure the startup command in Azure Web App
+      # Configure the startup command and other settings in Azure Web App
       - name: Configure Azure Web App
         uses: azure/appservice-settings@v1
         with:
@@ -162,16 +134,9 @@ jobs:
             },
             {
               "name": "STARTUP_COMMAND",
-              "value": "sudo chmod +x init.sh && sudo ./init.sh"
-            },
-            {
-              "name": "FFMPEG_PATH",
-              "value": "/usr/bin/ffmpeg"
-            },
-            {
-              "name": "FFPROBE_PATH",
-              "value": "/usr/bin/ffprobe"
+              "value": "chmod +x init.sh && ./init.sh"
             }
+            # FFMPEG_PATH and FFPROBE_PATH are set by init.sh script using 'export'
           ]'
 
       - name: Deploy to Azure Web App
