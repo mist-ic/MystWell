@@ -1,0 +1,57 @@
+trigger:
+  branches:
+    include:
+    - main
+    - master
+
+variables:
+  # Azure Container Registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: 'mystacr-connection'
+  imageRepository: 'mystwell-api'
+  containerRegistry: 'mystacr.azurecr.io'
+  dockerfilePath: '**/Dockerfile'
+  tag: '$(Build.BuildId)'
+  
+  # Azure Service connection for Web App deployment
+  azureSubscription: 'Azure-Service-Connection'
+  appName: 'mystwell-api'
+  resourceGroupName: 'mystwellresources'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:  
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: Docker@2
+      displayName: Build and push Docker image
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+          latest
+
+- stage: Deploy
+  displayName: Deploy to Azure App Service
+  dependsOn: Build
+  jobs:
+  - job: Deploy
+    displayName: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: AzureWebAppContainer@1
+      displayName: 'Azure Web App on Container Deploy'
+      inputs:
+        azureSubscription: $(azureSubscription)
+        appName: $(appName)
+        resourceGroupName: $(resourceGroupName)
+        imageName: $(containerRegistry)/$(imageRepository):$(tag)
+        configurationStrings: |
+          -WEBSITES_ENABLE_APP_SERVICE_STORAGE true 
