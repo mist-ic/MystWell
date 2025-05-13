@@ -37,11 +37,16 @@ jobs:
           cache-from: type=registry,ref=${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
+      - name: Log in to Azure 
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Set Web App ACR authentication
         uses: azure/CLI@v1
         with:
           inlineScript: |
-            az webapp config container set --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group mystwellresources --docker-custom-image-name ${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} --docker-registry-server-url https://${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io --docker-registry-server-user ${{ secrets.AZURE_REGISTRY_USERNAME }} --docker-registry-server-password ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+            az webapp config container set --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group mystwellresources --container-image-name ${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} --container-registry-url https://${{ env.AZURE_CONTAINER_REGISTRY }}.azurecr.io --container-registry-user ${{ secrets.AZURE_REGISTRY_USERNAME }} --container-registry-password ${{ secrets.AZURE_REGISTRY_PASSWORD }}
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
