@@ -62,11 +62,20 @@ jobs:
           apt-get update && apt-get install -y ffmpeg
           echo "Installing dependencies..."
           npm ci --production --prefer-offline
+          echo "Installing fluent-ffmpeg explicitly..."
+          npm install --no-package-lock fluent-ffmpeg
           echo "Starting application..."
           npm run start:prod
           EOF
           
           chmod +x deploy/init.sh
+          
+          # Install fluent-ffmpeg explicitly
+          echo "Adding fluent-ffmpeg to deployment package"
+          cd deploy
+          npm install --no-package-lock --no-save fluent-ffmpeg
+          cd ..
+          
           (cd deploy && zip -r ../release.zip .)
 
       - name: Upload artifact
