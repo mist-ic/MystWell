@@ -8,8 +8,7 @@ import { DocumentCard } from '@/components/DocumentCard';
 import { DocumentDetails } from '@/components/DocumentDetails';
 import { StyledSearchBar } from '@/components/ui/StyledSearchBar';
 import { TextInput } from 'react-native';
-// @ts-ignore - Suppress incorrect type definition error for default import
-import scanDocument from 'react-native-document-scanner-plugin';
+import DocumentScannerPlugin, { ResponseType } from 'react-native-document-scanner-plugin';
 import { useAuth } from '@/context/auth';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -476,9 +475,9 @@ export default function DocumentScreen() {
         // Note: The type definition for scanDocument might be inaccurate in the plugin's types
         // We might need to cast the result or use // @ts-ignore if linter complains here
         // @ts-ignore - Type definition issue with react-native-document-scanner-plugin
-        const result: { scannedImages?: string[] } = await scanDocument({
+        const result: { scannedImages?: string[] } = await DocumentScannerPlugin.scanDocument({
             croppedImageQuality: 100, 
-            responseType: 'imageFilePath', 
+            responseType: ResponseType.ImageFilePath, 
             maxNumDocuments: 1 
         });
 
