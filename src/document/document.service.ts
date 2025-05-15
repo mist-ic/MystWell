@@ -17,6 +17,9 @@ export interface Document {
   display_name: string | null;
   status: string;
   detected_document_type: string | null;
+  document_type: string | null;
+  document_date: string | null;
+  header_description: string | null;
   structured_data: any | null;
   error_message: string | null;
   created_at: string;
@@ -175,14 +178,20 @@ export class DocumentService {
     return updatedDoc;
   }
 
-  async getDocuments(userId: string): Promise<Document[]> {
+  async getDocuments(userId: string, documentType?: string): Promise<Document[]> {
     const profileId = await this.getProfileIdForUser(userId);
     // Use admin client to bypass RLS for fetching documents
-    const { data, error } = await this.supabaseAdmin
+    const query = this.supabaseAdmin
       .from('documents')
       .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: false });
+      .eq('profile_id', profileId);
+    
+    // If document type is specified, filter by it
+    if (documentType && documentType !== 'all') {
+      query.eq('document_type', documentType);
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       this.logger.error(`Error fetching documents for profile ${profileId}: ${error.message}`);
@@ -190,6 +199,47 @@ export class DocumentService {
     }
 
     return data || [];
+  }
+
+  async getDocumentsByType(userId: string, documentType: string): Promise<Document[]> {
+    const profileId = await this.getProfileIdForUser(userId);
+    
+    // Query documents by type
+    const { data, error } = await this.supabaseAdmin
+      .from('documents')
+      .select('*')
+      .eq('profile_id', profileId)
+      .eq('document_type', documentType)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      this.logger.error(`Error fetching documents by type ${documentType} for profile ${profileId}: ${error.message}`);
+      throw new InternalServerErrorException('Could not fetch documents by type.');
+    }
+    
+    return data || [];
+  }
+
+  async getDocumentTypes(userId: string): Promise<string[]> {
+    const profileId = await this.getProfileIdForUser(userId);
+    
+    // Query for distinct document types that exist for this profile
+    const { data, error } = await this.supabaseAdmin
+      .from('documents')
+      .select('document_type')
+      .eq('profile_id', profileId)
+      .eq('status', 'processed')
+      .not('document_type', 'is', null)
+      .order('document_type');
+    
+    if (error) {
+      this.logger.error(`Error fetching document types for profile ${profileId}: ${error.message}`);
+      throw new InternalServerErrorException('Could not fetch document types.');
+    }
+    
+    // Extract unique document types
+    const types = [...new Set(data.map(doc => doc.document_type))];
+    return types;
   }
 
   // Helper to verify ownership and get a document

@@ -1,4 +1,4 @@
-import { Controller, Post, UseGuards, Req, Get, Param, ParseUUIDPipe, Body, Delete, Put, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, UseGuards, Req, Get, Param, ParseUUIDPipe, Body, Delete, Put, HttpCode, HttpStatus, Query } from '@nestjs/common';
 import { DocumentService, Document } from './document.service';
 import { AuthGuard } from '../auth/auth.guard'; // Assuming AuthGuard is in auth module
 import { UploadCompleteDto } from './dto/upload-complete.dto';
@@ -31,11 +31,25 @@ export class DocumentController {
     );
   }
 
-  // Endpoint to get all documents for the user
+  // Endpoint to get all documents for the user with optional type filter
   @Get()
-  async getDocuments(@Req() req): Promise<Document[]> {
+  async getDocuments(@Req() req, @Query('type') documentType?: string): Promise<Document[]> {
     const userId = req.user?.id;
-    return this.documentService.getDocuments(userId);
+    return this.documentService.getDocuments(userId, documentType);
+  }
+
+  // Endpoint to get available document types
+  @Get('types')
+  async getDocumentTypes(@Req() req): Promise<string[]> {
+    const userId = req.user?.id;
+    return this.documentService.getDocumentTypes(userId);
+  }
+
+  // Endpoint to get documents by type
+  @Get('by-type/:type')
+  async getDocumentsByType(@Req() req, @Param('type') type: string): Promise<Document[]> {
+    const userId = req.user?.id;
+    return this.documentService.getDocumentsByType(userId, type);
   }
 
   // Endpoint to get details for a specific document

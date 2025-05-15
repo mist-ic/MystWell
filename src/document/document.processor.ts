@@ -158,7 +158,21 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
             generationConfig: { responseMimeType: "application/json" },
         });
 
-        const prompt = `Analyze the attached medical document (image or PDF) and extract the key information according to the following structure:\n\nStructure:\n{\n  \"headerDescription\": \"<Detailed summary including patient name, doc type, date, provider, key findings>\",\n  \"detected_document_type\": \"<Prescription | Lab Report | Doctor Note | Invoice | Other>\",\n  \"patient_name\": \"<Full Patient Name>\",\n  \"date_of_service\": \"<YYYY-MM-DD>\",\n  \"provider_name\": \"<Doctor/Clinic/Lab Name>\",\n  \"key_information\": [\"<Finding 1>\", \"<Finding 2>\"],\n  \"medications_mentioned\": [{\"name\": \"<Med Name>\", \"dosage\": \"<Dosage>\", \"frequency\": \"<Frequency>\"}],\n  \"follow_up_instructions\": \"<Follow-up details>\",\n  \"summary\": \"<Brief summary>\"\n}\n\nInstructions:\n1.  Extract the information from the document and populate the fields in the structure above.\n2.  Respond ONLY with the populated JSON object containing the extracted data.\n3.  DO NOT include the structure definition, markdown formatting (like \\\`\\\`\\\`json), or any other text outside the JSON object itself.\n4.  If information for a field is not found, use null or an empty string/array as appropriate for the field type.\n5.  Ensure the output is a single, valid JSON object.\n\nDocument Analysis:`;
+        const prompt = `
+You are analyzing a health document. Identify the following details:
+1. Document type: What kind of health document is this? (e.g., blood test, prescription, xray report, doctor's note, hospital discharge)
+2. Header description: Write a concise 1-2 sentence summary of what this document contains (max 150 characters)
+3. Document date: When was this document created? (in YYYY-MM-DD format)
+4. Key findings: Extract 3-5 main points from the document
+
+Format the response as a structured JSON object with the following fields:
+{
+  "detected_document_type": "blood_test | prescription | xray | imaging | doctor_note | hospital | insurance | other",
+  "headerDescription": "1-2 sentence summary",
+  "document_date": "YYYY-MM-DD or null if not found",
+  "key_findings": ["finding 1", "finding 2", "finding 3"]
+}
+`;
         const filePart = { inlineData: { data: base64Image, mimeType: mimeType } };
         
         const parts = [ { text: prompt }, filePart ];
@@ -339,48 +353,89 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
   }
 
   private async updateDocumentStatus(documentId: string, status: string, displayName?: string | undefined, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
-      const updateData: any = { 
-          status,
-          updated_at: new Date(),
-          // Reset error message unless explicitly setting failed status
-          error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
-              ? errorMessage?.substring(0, 500) 
-              : null 
-      }; 
+    const updateData: any = { 
+        status,
+        updated_at: new Date(),
+        // Reset error message unless explicitly setting failed status
+        error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
+            ? errorMessage?.substring(0, 500) 
+            : null 
+    }; 
 
-      if (status === 'processed') {
-          if (structuredData) {
-              updateData.structured_data = structuredData;
-              updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
-              if (structuredData.headerDescription) {
-                updateData.header_description = structuredData.headerDescription;
-              } else {
-                updateData.header_description = "Summary not available"; 
-                this.logger.warn(`headerDescription missing in structuredData for document ${documentId}. Using fallback.`);
-              }
-          }
-          if (embedding) { // Add embedding if available
-             updateData.embedding = embedding;
-          }
-          // Only update displayName if status is processed and displayName is provided
-          if (displayName !== undefined) {
-              updateData.display_name = displayName;
-          }
-      }
+    if (status === 'processed') {
+        if (structuredData) {
+            updateData.structured_data = structuredData;
+            updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
+            
+            // Extract header description
+            if (structuredData.headerDescription) {
+                updateData.header_description = structuredData.headerDescription.substring(0, 200);
+            }
+            
+            // Extract document type as a standardized value
+            if (structuredData.detected_document_type) {
+                updateData.document_type = this.standardizeDocumentType(structuredData.detected_document_type);
+            }
+            
+            // Extract document date if available
+            if (structuredData.document_date) {
+                try {
+                    // Try to parse the date (could be in YYYY-MM-DD format)
+                    const parsedDate = new Date(structuredData.document_date);
+                    if (!isNaN(parsedDate.getTime())) {
+                        updateData.document_date = parsedDate;
+                    }
+                } catch (error) {
+                    this.logger.warn(`Failed to parse document date: ${structuredData.document_date}`);
+                }
+            }
+        }
 
-      try {
-          const { error } = await this.supabaseAdmin
-              .from('documents')
-              .update(updateData)
-              .eq('id', documentId);
-              
-          if (error) {
-              this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
-              // Don't throw here, as it would cause the job to fail and retry unnecessarily
-          }
-      } catch (updateError) {
-          this.logger.error(`Error updating document ${documentId} status: ${updateError.message}`, updateError.stack);
-          // Don't throw here either
-      }
+        if (embedding) {
+            updateData.embedding = embedding;
+        }
+    }
+
+    if (displayName) {
+        updateData.display_name = displayName.substring(0, 100);
+    }
+
+    try {
+        const { data, error } = await this.supabaseAdmin
+            .from('documents')
+            .update(updateData)
+            .eq('id', documentId)
+            .select()
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        this.logger.log(`Document ${documentId} status updated to ${status}.`);
+        return data;
+    } catch (error) {
+        this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
+        throw error;
+    }
+  }
+
+  // Helper function to standardize document types
+  private standardizeDocumentType(detectedType: string): string {
+    const lowerType = detectedType.toLowerCase();
+    
+    // Map to standardized document types
+    if (lowerType.includes('blood') || lowerType.includes('lab')) return 'blood_test';
+    if (lowerType.includes('prescription')) return 'prescription';
+    if (lowerType.includes('xray') || lowerType.includes('mri') || lowerType.includes('ct') || 
+        lowerType.includes('ultrasound') || lowerType.includes('imaging')) return 'imaging';
+    if (lowerType.includes('discharge') || lowerType.includes('admission')) return 'hospital';
+    if (lowerType.includes('note') || lowerType.includes('clinical')) return 'doctor_note';
+    if (lowerType.includes('vaccine') || lowerType.includes('immunization')) return 'vaccination';
+    if (lowerType.includes('insurance') || lowerType.includes('claim')) return 'insurance';
+    if (lowerType.includes('bill') || lowerType.includes('invoice')) return 'invoice';
+    
+    // Default fallback
+    return 'other';
   }
 } 
