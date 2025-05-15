@@ -190,7 +190,7 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
               extractedJson = JSON.parse(match[0]);
               this.logger.log('Successfully extracted and parsed JSON from Gemini response.');
             } catch (extractError) {
-              this.logger.error(`Failed to extract valid JSON from response for document ${documentId}`, extractError.stack);
+              this.logger.error(`Failed to extract valid JSON from response for document ${documentId}. Content: ${match[0]}`, extractError.stack);
               await this.updateDocumentStatus(documentId, 'processing_failed', undefined, undefined, null, 'Failed to extract JSON from Gemini response');
               return { success: false, error: 'json_parse_error' };
             }
