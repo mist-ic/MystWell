@@ -352,6 +352,12 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
           if (structuredData) {
               updateData.structured_data = structuredData;
               updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
+              if (structuredData.headerDescription) {
+                updateData.header_description = structuredData.headerDescription;
+              } else {
+                updateData.header_description = "Summary not available"; 
+                this.logger.warn(`headerDescription missing in structuredData for document ${documentId}. Using fallback.`);
+              }
           }
           if (embedding) { // Add embedding if available
              updateData.embedding = embedding;
