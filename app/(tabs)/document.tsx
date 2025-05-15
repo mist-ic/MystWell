@@ -33,6 +33,9 @@ export interface DocumentInfo {
   display_name: string | null;
   status: 'pending_upload' | 'uploaded' | 'queued' | 'processing' | 'processed' | 'processing_failed' | 'processing_retried';
   detected_document_type: string | null;
+  document_type: string | null;
+  document_date: string | null;
+  header_description: string | null;
   structured_data: any | null; // Or a more specific type if known
   error_message: string | null;
   created_at: string;
@@ -53,7 +56,10 @@ export default function DocumentScreen() {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<string[]>([]);
+  const [selectedDocumentType, setSelectedDocumentType] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isTypesLoading, setIsTypesLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedDocumentMenu, setSelectedDocumentMenu] = useState<DocumentInfo | null>(null);
@@ -66,12 +72,21 @@ export default function DocumentScreen() {
   const [addDocumentModalVisible, setAddDocumentModalVisible] = useState(false);
   const [error, setError] = useState<string | null>(null); // Added error state
 
+  // --- Add menu for document type filter --- 
+  const [filterMenuVisible, setFilterMenuVisible] = useState(false);
+
   // --- Data Fetching --- 
-  const fetchDocuments = useCallback(async (checkPolling = false): Promise<DocumentInfo[] | null> => {
+  const fetchDocuments = useCallback(async (checkPolling = false, typeFilter?: string | null): Promise<DocumentInfo[] | null> => {
     if (!session || !currentProfileId) return null;
     if (!checkPolling) setIsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/documents`, {
+      // Append type filter if provided
+      const queryType = typeFilter || selectedDocumentType;
+      const endpoint = queryType ? 
+        `${API_BASE_URL}/documents?type=${encodeURIComponent(queryType)}` : 
+        `${API_BASE_URL}/documents`;
+        
+      const response = await fetch(endpoint, {
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
         }
@@ -99,11 +114,40 @@ export default function DocumentScreen() {
     } finally {
       if (!checkPolling) setIsLoading(false);
     }
+  }, [session, currentProfileId, selectedDocumentType]);
+
+  // Fetch available document types
+  const fetchDocumentTypes = useCallback(async () => {
+    if (!session || !currentProfileId) return;
+    setIsTypesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/types`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        }
+      });
+      if (!response.ok) {
+         throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const types = await response.json();
+      setDocumentTypes(types);
+    } catch (error) {
+      console.error("Error fetching document types:", error);
+      setDocumentTypes([]);
+    } finally {
+      setIsTypesLoading(false);
+    }
   }, [session, currentProfileId]);
 
   useEffect(() => {
     fetchDocuments();
-  }, [fetchDocuments]);
+    fetchDocumentTypes();
+  }, [fetchDocuments, fetchDocumentTypes]);
+
+  // Update documents when document type filter changes
+  useEffect(() => {
+    fetchDocuments(false, selectedDocumentType);
+  }, [selectedDocumentType]);
 
   // Check if we should open the add document modal (triggered from another screen)
   useEffect(() => {
@@ -520,6 +564,9 @@ export default function DocumentScreen() {
                     display_name: displayName,
                     status: 'pending_upload',
                     detected_document_type: null,
+                    document_type: null,
+                    document_date: null,
+                    header_description: null,
                     structured_data: null,
                     error_message: null,
                     created_at: new Date().toISOString(),
@@ -629,6 +676,9 @@ export default function DocumentScreen() {
         display_name: fileName,
         status: 'pending_upload',
         detected_document_type: null,
+        document_type: null,
+        document_date: null,
+        header_description: null,
         structured_data: null,
         error_message: null,
         created_at: new Date().toISOString(),
@@ -719,6 +769,67 @@ export default function DocumentScreen() {
      </View>
   );
 
+  // Handle document type filter
+  const handleSelectDocumentType = (type: string | null) => {
+    setSelectedDocumentType(type);
+    setFilterMenuVisible(false);
+  };
+
+  // Filter Components
+  const renderDocumentTypeFilter = () => (
+    <View style={styles.filterContainer}>
+      <Menu
+        visible={filterMenuVisible}
+        onDismiss={() => setFilterMenuVisible(false)}
+        anchor={
+          <Button 
+            mode="outlined" 
+            onPress={() => setFilterMenuVisible(true)}
+            icon="filter-variant"
+            style={styles.filterButton}
+          >
+            {selectedDocumentType ? formatDocumentType(selectedDocumentType) : "All Documents"}
+          </Button>
+        }
+      >
+        <Menu.Item 
+          title="All Documents" 
+          onPress={() => handleSelectDocumentType(null)} 
+          leadingIcon="file-document-outline"
+        />
+        {documentTypes.map((type) => (
+          <Menu.Item 
+            key={type} 
+            title={formatDocumentType(type)} 
+            onPress={() => handleSelectDocumentType(type)} 
+            leadingIcon={getIconForDocumentType(type)}
+          />
+        ))}
+      </Menu>
+    </View>
+  );
+
+  // Helper function to get icon for document type
+  const getIconForDocumentType = (type: string): string => {
+    const typeLower = type.toLowerCase();
+    if (typeLower.includes('prescription')) return "medical-bag";
+    if (typeLower.includes('blood_test')) return "test-tube";
+    if (typeLower.includes('report')) return "clipboard-text-outline";
+    if (typeLower.includes('note')) return "note-text-outline";
+    if (typeLower.includes('invoice')) return "receipt";
+    if (typeLower.includes('vaccination')) return "needle";
+    if (typeLower.includes('xray') || typeLower.includes('imaging')) return "radioactive";
+    return "file-document-outline";
+  };
+
+  // Helper function to format document type
+  const formatDocumentType = (type: string): string => {
+    return type
+      .replace(/_/g, ' ')
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
 
   // --- Main Render ---
   if (selectedDocumentForView) {
@@ -756,13 +867,16 @@ export default function DocumentScreen() {
       </View>
 
       {/* 3. Search bar - Use new component */}
-      <StyledSearchBar
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        placeholder="Search documents"
-        containerStyle={styles.searchContainerMargin}
-        accessibilityLabel="Search documents input"
-      />
+      <View style={styles.searchContainer}>
+        <StyledSearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search documents"
+          containerStyle={styles.searchContainerMargin}
+          accessibilityLabel="Search documents input"
+        />
+        {renderDocumentTypeFilter()}
+      </View>
 
       <ScrollView
         style={styles.scrollContainer}
@@ -1029,5 +1143,20 @@ const styles = StyleSheet.create({
   modalButton: {
     marginVertical: 8,    // Add vertical margin between buttons
     // Removed flexGrow: 1
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  searchBar: {
+    flex: 1,
+  },
+  filterContainer: {
+    marginLeft: 8,
+  },
+  filterButton: {
+    minWidth: 100,
   },
 });

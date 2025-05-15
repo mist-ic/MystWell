@@ -25,6 +25,26 @@ const getStatusDisplay = (status: DocumentInfo['status']) => {
     }
 };
 
+const formatDate = (dateString: string | null): string => {
+  if (!dateString) return '';
+  
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const formatDocumentType = (type: string | null): string => {
+  if (!type) return '';
+  
+  // Replace underscores with spaces and capitalize each word
+  return type
+    .replace(/_/g, ' ')
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 export function DocumentCard({ document, onPress, onMorePress }: DocumentCardProps) {
   const theme = useTheme();
   const [isPressed, setIsPressed] = useState(false);
@@ -36,15 +56,21 @@ export function DocumentCard({ document, onPress, onMorePress }: DocumentCardPro
   const cardBorderColor = isPressed ? '#E5E7EB' : theme.colors.outline;
 
   const iconStrokeColor = '#1F2937';
+  const documentDate = document.document_date || document.created_at;
+  const formattedDate = formatDate(documentDate);
+  const documentType = document.document_type || document.detected_document_type;
+  const formattedType = formatDocumentType(documentType);
 
   let fileIconName: keyof typeof MaterialCommunityIcons.glyphMap = "file-document-outline";
-  if (document.detected_document_type) {
-      const typeLower = document.detected_document_type.toLowerCase();
+  if (documentType) {
+      const typeLower = documentType.toLowerCase();
       if (typeLower.includes('prescription')) fileIconName = "medical-bag";
-      else if (typeLower.includes('lab') || typeLower.includes('report')) fileIconName = "clipboard-text-outline";
+      else if (typeLower.includes('blood_test') || typeLower.includes('lab_report')) fileIconName = "test-tube";
+      else if (typeLower.includes('report')) fileIconName = "clipboard-text-outline";
       else if (typeLower.includes('note') || typeLower.includes('summary')) fileIconName = "note-text-outline";
       else if (typeLower.includes('invoice') || typeLower.includes('bill')) fileIconName = "receipt";
       else if (typeLower.includes('vaccination')) fileIconName = "needle";
+      else if (typeLower.includes('xray') || typeLower.includes('imaging')) fileIconName = "radioactive";
   }
 
   return (
@@ -71,8 +97,15 @@ export function DocumentCard({ document, onPress, onMorePress }: DocumentCardPro
         <View style={styles.textContainer}>
           <Text style={styles.titleText} numberOfLines={1}>{document.display_name || 'Untitled Document'}</Text>
           <View style={styles.metadataGroup}>
-            {document.status === 'processed' && document.detected_document_type ? (
-                 <Text style={[styles.metadataText, styles.metadataTypeText]}>{document.detected_document_type}</Text>
+            {document.status === 'processed' ? (
+                 <>
+                    {formattedType && (
+                      <Text style={[styles.metadataText, styles.metadataTypeText]}>{formattedType}</Text>
+                    )}
+                    {formattedDate && (
+                      <Text style={[styles.metadataText, styles.metadataDateText]}>• {formattedDate}</Text>
+                    )}
+                 </>
             ) : (
                 <> 
                     {isProcessing && <ActivityIndicator size="small" color={statusDisplay.color} style={{ marginRight: 4 }}/>}
@@ -150,6 +183,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     fontWeight: '500',
     color: '#4B5563',
+  },
+  metadataDateText: {
+    color: '#6B7280',
+    marginLeft: 2,
   },
   spacer: {
   },
