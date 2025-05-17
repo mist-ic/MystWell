@@ -30,9 +30,16 @@ export class TranscriptionService {
     private readonly embeddingService: EmbeddingService,
     private readonly storageService: StorageService,
   ) {
+    const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
+    const supabaseServiceKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be defined');
+    }
+    
     this.supabase = createClient(
-      this.configService.get<string>('SUPABASE_URL'),
-      this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY'),
+      supabaseUrl,
+      supabaseServiceKey,
     );
   }
 

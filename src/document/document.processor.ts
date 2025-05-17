@@ -353,19 +353,19 @@ Format the response as a structured JSON object with the following fields:
   }
 
   private async updateDocumentStatus(documentId: string, status: string, displayName?: string | undefined, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
-    const updateData: any = { 
-        status,
-        updated_at: new Date(),
-        // Reset error message unless explicitly setting failed status
-        error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
-            ? errorMessage?.substring(0, 500) 
-            : null 
-    }; 
+      const updateData: any = { 
+          status,
+          updated_at: new Date(),
+          // Reset error message unless explicitly setting failed status
+          error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
+              ? errorMessage?.substring(0, 500) 
+              : null 
+      }; 
 
-    if (status === 'processed') {
-        if (structuredData) {
-            updateData.structured_data = structuredData;
-            updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
+      if (status === 'processed') {
+          if (structuredData) {
+              updateData.structured_data = structuredData;
+              updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
             
             // Extract header description
             if (structuredData.headerDescription) {
@@ -375,7 +375,7 @@ Format the response as a structured JSON object with the following fields:
             // Extract document type as a standardized value
             if (structuredData.detected_document_type) {
                 updateData.document_type = this.standardizeDocumentType(structuredData.detected_document_type);
-            }
+          }
             
             // Extract document date if available
             if (structuredData.document_date) {
@@ -398,24 +398,24 @@ Format the response as a structured JSON object with the following fields:
 
     if (displayName) {
         updateData.display_name = displayName.substring(0, 100);
-    }
+      }
 
-    try {
+      try {
         const { data, error } = await this.supabaseAdmin
-            .from('documents')
-            .update(updateData)
+              .from('documents')
+              .update(updateData)
             .eq('id', documentId)
             .select()
             .single();
-
-        if (error) {
+              
+          if (error) {
             throw error;
         }
 
         this.logger.log(`Document ${documentId} status updated to ${status}.`);
         return data;
     } catch (error) {
-        this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
+              this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
         throw error;
     }
   }
