@@ -30,12 +30,12 @@ export class ProfileService {
    * @returns The profile object or null if not found.
    */
   async getProfileByUserId(userId: string): Promise<Profile | null> {
-    // this.logger.log(`Attempting to fetch profile where user_id = ${userId} using Service Role`);
+    // this.logger.log(`Attempting to fetch profile where id = ${userId} using Service Role`);
     try {
       const { data, error, status } = await this.supabaseServiceRole
         .from('profiles')
         .select('id, user_id, email, full_name') // Select only needed fields
-        .eq('user_id', userId)
+        .eq('id', userId)
         .limit(1); // Ensure only one row is expected
 
       if (error) {
