@@ -6,6 +6,7 @@ import { SupabaseModule } from '../supabase/supabase.module';
 import { ChatGateway } from './chat.gateway';
 import { DocumentModule } from '../document/document.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
+import { UserSummaryModule } from '../user-summary/user-summary.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { TranscriptionModule } from '../transcription/transcription.module';
     SupabaseModule,
     DocumentModule,
     TranscriptionModule,
+    UserSummaryModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

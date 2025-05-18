@@ -15,6 +15,8 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { RemindersModule } from './reminders/reminders.module';
 import { TranscriptionModule } from './transcription/transcription.module';
+import { UserSummaryModule } from './user-summary/user-summary.module';
+import { EmbeddingModule } from './embedding/embedding.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { TranscriptionModule } from './transcription/transcription.module';
       inject: [ConfigService],
     }),
     SupabaseModule, // Import SupabaseModule
+    EmbeddingModule, // Import EmbeddingModule
+    UserSummaryModule, // Import UserSummaryModule
     MigrationModule, // Import MigrationModule
     RecordingModule, // Import RecordingModule
     AuthModule,

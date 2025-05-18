@@ -540,6 +540,41 @@ export type Database = {
           },
         ]
       }
+      user_health_summaries: {
+        Row: {
+          id: string
+          profile_id: string
+          summary_content: string | null
+          last_updated_source: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          profile_id: string
+          summary_content?: string | null
+          last_updated_source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          profile_id?: string
+          summary_content?: string | null
+          last_updated_source?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_health_summaries_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never

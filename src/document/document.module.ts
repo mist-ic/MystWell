@@ -10,6 +10,7 @@ import { REQUEST } from '@nestjs/core';
 import { Request } from 'express';
 import { SUPABASE_SERVICE_ROLE_CLIENT, SupabaseModule } from '../supabase/supabase.module'; // Import the service role client token and the module
 import { ProfileModule } from '../profile/profile.module'; // Import ProfileModule
+import { UserSummaryModule } from '../user-summary/user-summary.module'; // Import UserSummaryModule
 
 // Define a token for the request-scoped client
 // export const SUPABASE_REQUEST_CLIENT = 'SUPABASE_REQUEST_CLIENT'; // Remove this line as we now import from constants
@@ -19,6 +20,7 @@ import { ProfileModule } from '../profile/profile.module'; // Import ProfileModu
     ConfigModule, // Import ConfigModule to access ConfigService
     SupabaseModule, // Import SupabaseModule explicitly to ensure providers are available
     ProfileModule, // Import ProfileModule to access ProfileService
+    UserSummaryModule, // Import UserSummaryModule to access UserSummaryService
     BullModule.registerQueueAsync({
       name: DOCUMENT_PROCESSING_QUEUE,
       imports: [ConfigModule], // Need ConfigModule to inject ConfigService

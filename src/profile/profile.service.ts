@@ -1,6 +1,7 @@
 import { Injectable, Inject, NotFoundException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_CLIENT, SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module';
+import { UserSummaryService } from '../user-summary/user-summary.service';
 
 // Export the interface
 export interface Profile {
@@ -9,6 +10,11 @@ export interface Profile {
   email?: string;
   phone?: string;
   full_name?: string;
+  date_of_birth?: string;
+  gender?: string;
+  medical_conditions?: string[];
+  allergies?: string[];
+  medications?: string[];
   // Add other profile fields as needed
 }
 
@@ -19,6 +25,7 @@ export class ProfileService {
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient,
     @Inject(SUPABASE_SERVICE_ROLE_CLIENT) private readonly supabaseServiceRole: SupabaseClient,
+    private readonly userSummaryService: UserSummaryService,
   ) {}
 
   /**
@@ -34,7 +41,7 @@ export class ProfileService {
     try {
       const { data, error, status } = await this.supabaseServiceRole
         .from('profiles')
-        .select('id, user_id, email, full_name') // Select only needed fields
+        .select('id, user_id, email, full_name, date_of_birth, gender, medical_conditions, allergies, medications') // Select fields needed for health summary
         .eq('id', userId)
         .limit(1); // Ensure only one row is expected
 
@@ -51,6 +58,10 @@ export class ProfileService {
 
       const profile = data[0] as Profile; // Get the first element
       this.logger.log(`[ProfileService] Profile found using Service Role: ID=${profile.id}, UserId=${profile.user_id}, Email=${profile.email || 'N/A'}`);
+      
+      // Generate initial health summary if needed
+      await this.initializeHealthSummary(profile);
+      
       return profile;
       
     } catch (e) {
@@ -80,8 +91,27 @@ export class ProfileService {
       // Don't throw, return null if not found due to RLS or error
       return null; 
     }
+
+    if (data) {
+      // Generate initial health summary if needed
+      await this.initializeHealthSummary(data);
+    }
+    
     // this.logger.log(`Profile ${data ? 'found' : 'not found'} using Standard Client: ID=${data?.id}`);
     return data;
+  }
+
+  /**
+   * Initializes a health summary for a profile if it doesn't exist yet
+   */
+  private async initializeHealthSummary(profile: Profile): Promise<void> {
+    try {
+      // Call the UserSummaryService to create initial summary
+      await this.userSummaryService.createInitialSummary(profile);
+    } catch (error) {
+      // Log error but don't fail the profile fetching operation
+      this.logger.error(`Failed to initialize health summary for profile ${profile.id}: ${error.message}`);
+    }
   }
 
   // --- Placeholder for other profile methods --- 

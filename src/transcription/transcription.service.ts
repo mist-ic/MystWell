@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { EmbeddingService } from '../embedding/embedding.service';
 import { StorageService } from '../storage/storage.service';
+import { UserSummaryService } from '../user-summary/user-summary.service';
 
 // Define types for transcription data
 export interface Transcription {
@@ -29,6 +30,7 @@ export class TranscriptionService {
     private readonly configService: ConfigService,
     private readonly embeddingService: EmbeddingService,
     private readonly storageService: StorageService,
+    private readonly userSummaryService: UserSummaryService,
   ) {
     const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
     const supabaseServiceKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
@@ -140,6 +142,20 @@ export class TranscriptionService {
         throw new InternalServerErrorException('Failed to create transcription');
       }
 
+      // Update the user's health summary with the new transcription
+      try {
+        await this.userSummaryService.updateSummaryFromTranscription(profileId, {
+          transcriptionId: data.id,
+          summary: summary,
+          content: content,
+          recordingDate: data.recording_date || undefined
+        });
+        this.logger.log(`Updated health summary for profile ${profileId} with new transcription ${data.id}`);
+      } catch (summaryError) {
+        // Log but don't fail the transcription creation
+        this.logger.error(`Failed to update health summary with transcription: ${summaryError.message}`);
+      }
+
       return data;
     } catch (error) {
       this.logger.error(`Error creating transcription: ${error.message}`);
@@ -173,6 +189,22 @@ export class TranscriptionService {
       if (error) {
         this.logger.error(`Error updating transcription ${transcriptionId}: ${error.message}`);
         throw new InternalServerErrorException('Failed to update transcription');
+      }
+
+      // If content or summary was updated, update the user's health summary
+      if (updates.content || updates.summary) {
+        try {
+          await this.userSummaryService.updateSummaryFromTranscription(data.profile_id, {
+            transcriptionId: data.id,
+            summary: data.summary,
+            content: data.content,
+            recordingDate: data.recording_date || undefined
+          });
+          this.logger.log(`Updated health summary for profile ${data.profile_id} with updated transcription ${data.id}`);
+        } catch (summaryError) {
+          // Log but don't fail the transcription update
+          this.logger.error(`Failed to update health summary with updated transcription: ${summaryError.message}`);
+        }
       }
 
       return data;

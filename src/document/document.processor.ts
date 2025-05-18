@@ -6,6 +6,7 @@ import { SUPABASE_SERVICE_ROLE_CLIENT } from '../supabase/supabase.module'; // C
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, Schema, SchemaType } from '@google/generative-ai';
+import { UserSummaryService } from '../user-summary/user-summary.service';
 
 interface DocumentJobData {
   storagePath: string; 
@@ -23,6 +24,7 @@ export class DocumentProcessor extends WorkerHost implements OnModuleInit {
   constructor(
     @Inject(SUPABASE_SERVICE_ROLE_CLIENT) private readonly supabaseAdmin: SupabaseClient,
     private readonly configService: ConfigService,
+    private readonly userSummaryService: UserSummaryService,
   ) {
     super(); // Call super() for WorkerHost
     // Initialize Google AI Client
@@ -353,69 +355,98 @@ Format the response as a structured JSON object with the following fields:
   }
 
   private async updateDocumentStatus(documentId: string, status: string, displayName?: string | undefined, structuredData?: any, embedding?: number[] | null, errorMessage?: string) {
-      const updateData: any = { 
-          status,
-          updated_at: new Date(),
-          // Reset error message unless explicitly setting failed status
-          error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
-              ? errorMessage?.substring(0, 500) 
-              : null 
-      }; 
+    // Prepare update object
+    const updateData: any = { 
+        status,
+        updated_at: new Date(),
+        // Reset error message unless explicitly setting failed status
+        error_message: ['processing_failed', 'download_failed', 'retry_pending', 'quota_exceeded'].includes(status) 
+            ? errorMessage?.substring(0, 500) 
+            : null 
+    }; 
 
-      if (status === 'processed') {
-          if (structuredData) {
-              updateData.structured_data = structuredData;
-              updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
-            
-            // Extract header description
-            if (structuredData.headerDescription) {
-                updateData.header_description = structuredData.headerDescription.substring(0, 200);
-            }
-            
-            // Extract document type as a standardized value
-            if (structuredData.detected_document_type) {
-                updateData.document_type = this.standardizeDocumentType(structuredData.detected_document_type);
+    if (status === 'processed') {
+        if (structuredData) {
+            updateData.structured_data = structuredData;
+            updateData.detected_document_type = structuredData.detected_document_type ?? 'Unknown'; 
+      
+          // Extract header description
+          if (structuredData.headerDescription) {
+              updateData.header_description = structuredData.headerDescription.substring(0, 200);
           }
-            
-            // Extract document date if available
-            if (structuredData.document_date) {
-                try {
-                    // Try to parse the date (could be in YYYY-MM-DD format)
-                    const parsedDate = new Date(structuredData.document_date);
-                    if (!isNaN(parsedDate.getTime())) {
-                        updateData.document_date = parsedDate;
-                    }
-                } catch (error) {
-                    this.logger.warn(`Failed to parse document date: ${structuredData.document_date}`);
-                }
-            }
+          
+          // Extract document type as a standardized value
+          if (structuredData.detected_document_type) {
+              updateData.document_type = this.standardizeDocumentType(structuredData.detected_document_type);
         }
-
-        if (embedding) {
-            updateData.embedding = embedding;
-        }
-    }
-
-    if (displayName) {
-        updateData.display_name = displayName.substring(0, 100);
+          
+          // Extract document date if available
+          if (structuredData.document_date) {
+              try {
+                  // Try to parse the date (could be in YYYY-MM-DD format)
+                  const parsedDate = new Date(structuredData.document_date);
+                  if (!isNaN(parsedDate.getTime())) {
+                      updateData.document_date = parsedDate;
+                  }
+              } catch (error) {
+                  this.logger.warn(`Failed to parse document date: ${structuredData.document_date}`);
+              }
+          }
       }
 
-      try {
-        const { data, error } = await this.supabaseAdmin
-              .from('documents')
-              .update(updateData)
-            .eq('id', documentId)
-            .select()
-            .single();
-              
-          if (error) {
-            throw error;
-        }
+      if (embedding) {
+          updateData.embedding = embedding;
+      }
+  }
 
-        this.logger.log(`Document ${documentId} status updated to ${status}.`);
-        return data;
+  if (displayName) {
+      updateData.display_name = displayName.substring(0, 100);
+    }
+
+    try {
+      const { data, error } = await this.supabaseAdmin
+            .from('documents')
+            .update(updateData)
+          .eq('id', documentId)
+          .select('id, profile_id, display_name, document_type, document_date, header_description')
+          .single();
+            
+        if (error) {
+          throw error;
+      }
+
+      this.logger.log(`Document ${documentId} status updated to ${status}.`);
+      
+      // If document was successfully processed, update the user's health summary
+      if (status === 'processed' && structuredData && data) {
+        try {
+          const profileId = data.profile_id;
+          const headerDescription = data.header_description || structuredData.headerDescription || '';
+          const documentType = data.document_type || structuredData.detected_document_type || 'unknown';
+          const documentDate = data.document_date || structuredData.document_date || new Date().toISOString().split('T')[0];
+          
+          // Update the user health summary with this new document
+          await this.userSummaryService.updateSummaryWithNewDocument(
+            profileId,
+            {
+              displayName: data.display_name || 'Untitled Document',
+              documentType: documentType,
+              documentDate: documentDate,
+              headerDescription: headerDescription,
+              documentId: documentId
+            }
+          );
+          
+          this.logger.log(`Updated health summary for profile ${profileId} with document ${documentId}`);
+        } catch (summaryError) {
+          // Log the error but don't fail the document processing
+          this.logger.error(`Failed to update health summary for document ${documentId}: ${summaryError.message}`);
+        }
+      }
+
+      return data;
     } catch (error) {
-              this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
+        this.logger.error(`Failed to update document ${documentId} status: ${error.message}`);
         throw error;
     }
   }
