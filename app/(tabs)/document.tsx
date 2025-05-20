@@ -868,13 +868,13 @@ export default function DocumentScreen() {
 
       {/* 3. Search bar - Use new component */}
       <View style={styles.searchContainer}>
-        <StyledSearchBar
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search documents"
-          containerStyle={styles.searchContainerMargin}
-          accessibilityLabel="Search documents input"
-        />
+      <StyledSearchBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Search documents"
+        containerStyle={styles.searchContainerMargin}
+        accessibilityLabel="Search documents input"
+      />
         {renderDocumentTypeFilter()}
       </View>
 

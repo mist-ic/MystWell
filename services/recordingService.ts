@@ -1,3 +1,13 @@
+import {
+  AppError,
+  ApiError,
+  NetworkError,
+  NotFoundError,
+  AuthenticationError,
+  AuthorizationError,
+  handleError // We might not use handleError directly if fetch handling is custom
+} from '../utils/errors';
+
 // Placeholder for Recording type - Define based on actual API response
 export interface Recording {
   id: string;
@@ -28,7 +38,78 @@ export interface Recording {
 }
 
 // API base URL
-const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
+// TODO: Consider moving this to a configuration file or environment variable
+const API_BASE_URL = 'REDACTED_API_URL'; 
+
+/**
+ * Helper to process fetch response and throw appropriate errors.
+ */
+async function handleFetchResponse<T>(
+  response: Response,
+  context: string,
+  successStatusCode: number = 200 // Expected success status code for GET/POST/PUT
+): Promise<T> {
+  if (response.ok && response.status === successStatusCode) {
+    if (response.status === 204) { // Handle No Content for DELETE success
+      return {} as T; // Or undefined, depending on expected return for 204
+    }
+    try {
+      return await response.json() as T;
+    } catch (jsonError) {
+      console.error(`Error parsing JSON response in ${context}:`, jsonError, await response.text());
+      throw new ApiError(
+        `InvalidJsonResponseIn${context}`,
+        `The server provided an invalid response for ${context}.`,
+        jsonError
+      );
+    }
+  }
+
+  let errorData: any = null;
+  let errorMessageFromServer = response.statusText || `Failed API call in ${context}`;
+  try {
+    errorData = await response.json();
+    if (errorData && typeof errorData.message === 'string') {
+      errorMessageFromServer = errorData.message;
+    }
+  } catch (e) {
+    // Not a JSON error response, or empty. Use statusText or default.
+    console.warn(`Could not parse error response as JSON in ${context} (status: ${response.status})`);
+  }
+
+  const serviceContext = `in ${context}`;
+
+  switch (response.status) {
+    case 400:
+      throw new ApiError(
+        `BadRequest${context}`,
+        `Invalid request ${serviceContext}: ${errorMessageFromServer}`,
+        { response, errorData }, 
+        response.status
+      );
+    case 401:
+      throw new AuthenticationError(errorMessageFromServer, { response, errorData });
+    case 403:
+      throw new AuthorizationError(errorMessageFromServer, { response, errorData });
+    case 404:
+      throw new NotFoundError(context, `The requested ${context.toLowerCase()} was not found. ${errorMessageFromServer}`, { response, errorData });
+    case 429: // Too Many Requests
+        throw new ApiError(
+            `TooManyRequests${context}`,
+            `Too many requests ${serviceContext}. Please try again later. ${errorMessageFromServer}`,
+            { response, errorData },
+            response.status
+        );
+    default:
+      // Includes 5xx server errors
+      throw new ApiError(
+        `ApiError${response.status}In${context}`,
+        `An API error (status: ${response.status}) occurred ${serviceContext}. ${errorMessageFromServer}`,
+        { response, errorData },
+        response.status
+      );
+  }
+}
 
 /**
  * Fetches a specific recording by its ID from the backend.
@@ -38,13 +119,13 @@ const API_BASE_URL = 'REDACTED_API_URL'; // Hardcoded production URL
  * @throws Will throw an error if the fetch fails or the recording is not found.
  */
 export const getRecordingById = async (id: string, token: string): Promise<Recording> => {
-  console.log(`Fetching recording with ID: ${id} from ${API_BASE_URL}`);
+  const context = "GetRecordingById";
+  console.log(`Fetching recording with ID: ${id} from ${API_BASE_URL} (${context})`);
 
-  // --- Real API Call Implementation ---
   try {
     const headers = {
       'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json' // Optional, but good practice
+      'Content-Type': 'application/json'
     };
 
     const response = await fetch(`${API_BASE_URL}/recordings/${id}`, {
@@ -52,40 +133,15 @@ export const getRecordingById = async (id: string, token: string): Promise<Recor
       headers: headers 
     }); 
 
-    if (!response.ok) {
-      let errorMessage = `HTTP error ${response.status}: ${response.statusText || 'Failed to fetch recording'}`;
-      try {
-          const errorData = await response.json();
-          errorMessage = `Error ${response.status}: ${errorData.message || errorMessage}`;
-      } catch (parseError) {
-          // Ignore if response body is not JSON or empty
-      }
-      // Add a specific check for 401 to provide a clearer message if needed elsewhere
-      if (response.status === 401) {
-         throw new Error('Authorization failed. Token might be invalid or missing.');
-      }
-      throw new Error(errorMessage);
-    }
+    return await handleFetchResponse<Recording>(response, context);
 
-    const data: Recording = await response.json();
-    return data;
   } catch (error) {
-    console.error(`Error in getRecordingById(${id}):`, error);
-    if (error instanceof Error) {
-        throw error; 
-    } else {
-        throw new Error('An unexpected error occurred during fetch.');
-    }
+    console.error(`Error in ${context}(${id}):`, error);
+    if (error instanceof AppError) throw error;
+    // For non-fetch related errors (e.g., network totally down before fetch is called)
+    // or errors not caught by handleFetchResponse (should be rare)
+    throw new NetworkError(error, `A network issue occurred while trying to fetch recording ${id}.`); 
   }
-  // --- End Real API Call ---
-
-  /* --- Removed Mock Data --- 
-  // Simulate API delay
-  // await new Promise(resolve => setTimeout(resolve, 500)); 
-  
-  // Simulate different scenarios based on ID for testing
-  // ... mock data removed ...
-  */
 };
 
 /**
@@ -96,7 +152,8 @@ export const getRecordingById = async (id: string, token: string): Promise<Recor
  * @throws Will throw an error if the deletion fails.
  */
 export const deleteRecording = async (id: string, token: string): Promise<void> => {
-  console.log(`Deleting recording with ID: ${id} from ${API_BASE_URL}`);
+  const context = "DeleteRecording";
+  console.log(`Deleting recording with ID: ${id} from ${API_BASE_URL} (${context})`);
 
   try {
     const headers = {
@@ -108,42 +165,27 @@ export const deleteRecording = async (id: string, token: string): Promise<void> 
       headers: headers,
     });
 
+    // For DELETE, a 204 No Content is typical success.
+    // handleFetchResponse expects JSON by default for 200, so we handle 204 separately here for clarity,
+    // or adjust handleFetchResponse if 204 is common for other methods too.
     if (response.status === 204) {
-      // Successful deletion (No Content)
-      return;
+      return; // Successfully deleted
     }
     
-    if (!response.ok) {
-        let errorMessage = `HTTP error ${response.status}: ${response.statusText || 'Failed to delete recording'}`;
-        try {
-            const errorData = await response.json();
-            errorMessage = `Error ${response.status}: ${errorData.message || errorMessage}`;
-        } catch (parseError) {
-            // Ignore if response body is not JSON or empty
-        }
-        if (response.status === 401) {
-            throw new Error('Authorization failed. Token might be invalid or missing.');
-        }
-        if (response.status === 403) {
-            throw new Error('Forbidden. You do not have permission to delete this recording.');
-        }
-        if (response.status === 404) {
-            throw new Error('Recording not found.');
-        }
-        throw new Error(errorMessage);
+    // If not 204, let handleFetchResponse process it (it will throw an error for non-ok responses)
+    // We pass a dummy success code that won't match if response.ok is false.
+    await handleFetchResponse<any>(response, context, response.ok ? response.status : -1);
+    
+    // If handleFetchResponse didn't throw for an OK response that wasn't 204 (e.g. 200 on DELETE)
+    if(response.ok) {
+        console.warn(`Unexpected successful status code ${response.status} received after DELETE in ${context}.`);
+        return; // Still consider it a success if it was OK.
     }
-
-    // Handle unexpected success statuses if needed (e.g., 200 OK)
-    // Normally, DELETE should return 204 No Content on success.
-    console.warn(`Unexpected successful status code ${response.status} received after DELETE.`);
 
   } catch (error) {
-    console.error(`Error in deleteRecording(${id}):`, error);
-    if (error instanceof Error) {
-      throw error; 
-    } else {
-      throw new Error('An unexpected error occurred during deletion.');
-    }
+    console.error(`Error in ${context}(${id}):`, error);
+    if (error instanceof AppError) throw error;
+    throw new NetworkError(error, `A network issue occurred while trying to delete recording ${id}.`);
   }
 };
 
@@ -155,7 +197,8 @@ export const deleteRecording = async (id: string, token: string): Promise<void> 
  * @throws Will throw an error if the retry fails
  */
 export const retryTranscription = async (id: string, token: string): Promise<Recording> => {
-  console.log(`Retrying transcription for recording with ID: ${id}`);
+  const context = "RetryTranscription";
+  console.log(`Retrying transcription for recording with ID: ${id} (${context})`);
 
   try {
     const headers = {
@@ -168,29 +211,13 @@ export const retryTranscription = async (id: string, token: string): Promise<Rec
       headers: headers
     });
 
-    if (!response.ok) {
-      let errorMessage = `HTTP error ${response.status}: ${response.statusText || 'Failed to retry transcription'}`;
-      try {
-        const errorData = await response.json();
-        errorMessage = `Error ${response.status}: ${errorData.message || errorMessage}`;
-      } catch (parseError) {
-        // Ignore if response body is not JSON or empty
-      }
-      if (response.status === 401) {
-        throw new Error('Authorization failed. Token might be invalid or missing.');
-      }
-      throw new Error(errorMessage);
-    }
+    // Assuming POST returns 200 OK with the updated/new recording data
+    return await handleFetchResponse<Recording>(response, context, 200);
 
-    const data: Recording = await response.json();
-    return data;
   } catch (error) {
-    console.error(`Error in retryTranscription(${id}):`, error);
-    if (error instanceof Error) {
-      throw error;
-    } else {
-      throw new Error('An unexpected error occurred during transcription retry.');
-    }
+    console.error(`Error in ${context}(${id}):`, error);
+    if (error instanceof AppError) throw error;
+    throw new NetworkError(error, `A network issue occurred while trying to retry transcription for recording ${id}.`);
   }
 };
 
