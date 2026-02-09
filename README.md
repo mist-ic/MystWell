@@ -12,6 +12,8 @@
 
 > **A comprehensive mobile health app for medication management, medical document scanning, and AI-powered voice notes.**
 
+> ⚠️ **This project has been shelved.** MystWell was a startup experiment that helped me learn production-grade mobile + backend development. Something bigger and better is in the works, stay tuned. 🚀
+
 </div>
 
 ---
